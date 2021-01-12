@@ -161,58 +161,13 @@ EXPORT_SYMBOL(nss_cryptoapi_aead_ctx2session);
  	}
 
  	nss_cryptoapi_clear_magic(ctx);
- }
-
-/*
- * nss_cryptoapi_aead_extract_key()
- * 	Populate nss_crypto_key structures for cip and auth.
- */
-int nss_cryptoapi_aead_extract_key(const u8 *key, unsigned int keylen, struct nss_crypto_key *cip, struct nss_crypto_key *auth)
-{
-	struct rtattr *rta = (struct rtattr *)key;
-	struct crypto_authenc_key_param *param;
-	uint32_t enc_key_len, auth_key_len;
-
-	if (!RTA_OK(rta, keylen)) {
-		nss_cfi_err("badkey RTA attr NOT ok keylen: %d\n", keylen);
-		return -EINVAL;
-	}
-
-	if (rta->rta_type != CRYPTO_AUTHENC_KEYA_PARAM) {
-		nss_cfi_err("badkey rta_type != CRYPTO_AUTHENC_KEYA_PARAM, rta_type: %d\n", rta->rta_type);
-		return -EINVAL;
-	}
-
-	if (RTA_PAYLOAD(rta) < sizeof(*param)) {
-		nss_cfi_err("RTA_PAYLOAD < param: %d\n", sizeof(*param));
-		return -EINVAL;
-	}
-
-	param = RTA_DATA(rta);
-
-	key += RTA_ALIGN(rta->rta_len);
-	keylen -= RTA_ALIGN(rta->rta_len);
-
-	enc_key_len = be32_to_cpu(param->enckeylen);
-	auth_key_len = keylen - enc_key_len;
-
-	nss_cfi_assert(enc_key_len);
-	nss_cfi_assert(auth_key_len);
-
-	auth->key = (uint8_t *)key;
-	auth->key_len = auth_key_len;
-
-	cip->key = (uint8_t *)key + auth_key_len;
-	cip->key_len = enc_key_len;
-
-	return 0;
 }
 
 /*
- * nss_cryptoapi_aead_aes_setkey()
- * 	Cryptoapi setkey routine for aead (aes/sha) algorithms.
+ * nss_cryptoapi_aead_setkey()
+ * 	Cryptoapi setkey routine for aead algorithms.
  */
-int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *aead, const u8 *key, unsigned int keylen)
+int nss_cryptoapi_aead_setkey(struct crypto_aead *aead, const u8 *key, unsigned int keylen)
 {
 	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
@@ -221,26 +176,18 @@ int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *aead, const u8 *key, unsig
 	struct nss_crypto_key auth;
 	uint32_t flag = CRYPTO_TFM_RES_BAD_KEY_LEN;
 	nss_crypto_status_t status;
-	bool ctr_mode = false;
-	bool cbc_mode = false;
-	int ret;
+	struct crypto_authenc_keys keys;
+	struct crypto_aes_ctx aes;
+	unsigned ret = 0;
 
 	/*
 	 * validate magic number - init should be called before setkey
 	 */
 	nss_cryptoapi_verify_magic(ctx);
 
-	if (atomic_cmpxchg(&ctx->refcnt, 0, 1)) {
-		nss_cfi_err("reusing context, setkey is already called\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * Extract and cipher and auth key
-	 */
-	if (nss_cryptoapi_aead_extract_key(key, keylen, &cip, &auth)) {
-		nss_cfi_err("Invalid cryptoapi context\n");
-		return -EINVAL;
+	if (crypto_authenc_extractkeys(&keys, key, keylen)) {
+		ret = -EINVAL;
+		goto fail;
 	}
 
 	/*
@@ -249,92 +196,95 @@ int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *aead, const u8 *key, unsig
 	if (!strncmp("nss-hmac-sha256-rfc3686-ctr-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CTR;
 		auth.algo = NSS_CRYPTO_AUTH_SHA256_HMAC;
-		ctr_mode = true;
+		ctx->is_rfc3686 = true;
 	} else if (!strncmp("nss-hmac-sha1-rfc3686-ctr-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CTR;
 		auth.algo = NSS_CRYPTO_AUTH_SHA1_HMAC;
-		ctr_mode = true;
+		ctx->is_rfc3686 = true;
 	} else if (!strncmp("nss-hmac-sha256-cbc-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CBC;
 		auth.algo = NSS_CRYPTO_AUTH_SHA256_HMAC;
-		cbc_mode = true;
 	} else if (!strncmp("nss-hmac-sha1-cbc-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CBC;
 		auth.algo = NSS_CRYPTO_AUTH_SHA1_HMAC;
-		cbc_mode = true;
+	} else if (!strncmp("nss-hmac-sha1-cbc-3des", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
+		cip.algo = NSS_CRYPTO_CIPHER_DES;
+		auth.algo = NSS_CRYPTO_AUTH_SHA1_HMAC;
+	} else if (!strncmp("nss-hmac-sha256-cbc-3des", crypto_tfm_alg_driver_name(tfm),CRYPTO_MAX_ALG_NAME)) {
+		cip.algo = NSS_CRYPTO_CIPHER_DES;
+		auth.algo = NSS_CRYPTO_AUTH_SHA256_HMAC;
+
 	} else {
 		goto fail;
 	}
 
-	/*
-	 * For RFC3686 CTR mode we construct the IV such that
-	 * - First word is key nonce
-	 * - Second & third word set to the IV provided by seqiv
-	 * - Last word set to counter '1'
-	 */
-	if (ctr_mode) {
-		cip.key_len = cip.key_len - CTR_RFC3686_NONCE_SIZE;
-
-		ctx->ctx_iv[0] = *(uint32_t *)(cip.key + cip.key_len);
-		ctx->ctx_iv[3] = ntohl(0x1);
-	}
-
-	/*
-	 * This should never happen
-	 */
-	BUG_ON(!ctr_mode && !cbc_mode);
-
 	ctx->cip_alg = cip.algo;
 	ctx->auth_alg = auth.algo;
+	ctx->blksize = crypto_tfm_alg_blocksize(tfm);
+	cip.key = (uint8_t *)keys.enckey;
+	cip.key_len = keys.enckeylen;
 
-	/*
-	 * Validate auth key length
-	 */
-	if (auth.key_len != crypto_aead_alg(aead)->maxauthsize) {
-		nss_cfi_err("Bad Auth key_len(%d)\n", auth.key_len);
-		goto fail;
+	if (ctx->is_rfc3686) {
+		if (keys.enckeylen < CTR_RFC3686_NONCE_SIZE)
+			goto fail;
+
+		cip.key_len = cip.key_len - CTR_RFC3686_NONCE_SIZE;
+		ctx->nonce = *(uint32_t *)(cip.key + cip.key_len);
 	}
 
-	/*
-	 * When the specified length request can't be handled by hardware,
-	 * fallback to other crypto
-	 */
+	switch (ctx->cip_alg) {
+	case NSS_CRYPTO_CIPHER_AES_CBC:
+	case NSS_CRYPTO_CIPHER_AES_CTR:
+		ret = aes_expandkey(&aes, cip.key, cip.key_len);
+		break;
+	case NSS_CRYPTO_CIPHER_DES:
+		ret = verify_aead_des3_key(aead, cip.key, cip.key_len);
+		if (ret)
+			goto fail;
+		goto no_fallback;
+	default:
+		ret = -EINVAL;
+	}
+	if (ret)
+		goto fail;
+
 	switch (cip.key_len) {
-	case NSS_CRYPTOAPI_KEYLEN_AES128:
-	case NSS_CRYPTOAPI_KEYLEN_AES256:
+	case AES_KEYSIZE_128:
+	case AES_KEYSIZE_256:
 		/* success */
 		ctx->fallback_req = false;
 		break;
-	case NSS_CRYPTOAPI_KEYLEN_AES192:
+	case AES_KEYSIZE_192:
 		/* We don't support AES192, fallback to software crypto */
-		if (!ctx->sw_tfm) {
-			goto fail;
-		}
-
 		ctx->fallback_req = true;
-		ctx->sid = NSS_CRYPTO_MAX_IDXS;
+		break;
+	default:
+		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
+		goto fail;
+	}
 
-		/* set flag to fallback tfm */
-		crypto_tfm_clear_flags(ctx->sw_tfm, CRYPTO_TFM_REQ_MASK);
-		crypto_tfm_set_flags(ctx->sw_tfm, crypto_aead_get_flags(aead) & CRYPTO_TFM_REQ_MASK);
+	if ((ctx->fallback_req) && (!ctx->sw_tfm))
+			goto fail;
 
-		/* set key to the fallback tfm */
+	if (ctx->sw_tfm) {
+		 /* Set key to the fallback tfm */
 		ret = crypto_aead_setkey(__crypto_aead_cast(ctx->sw_tfm), key, keylen);
-		if (ret) {
-			nss_cfi_err("Setting key to software cryto failed\n");
-			/*
-			 * Set back the fallback tfm flag to the original flag one after
-			 * doing setkey
-			 */
-			crypto_aead_set_flags(aead, crypto_tfm_get_flags(ctx->sw_tfm));
-		}
-		return ret;
-	default:
-		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
-		goto fail;
+		if (ret)
+			nss_cfi_err("Failed to set key to the sw crypto");
+
+		if (ctx->fallback_req)
+			return ret;
 	}
 
-	status = nss_crypto_session_alloc(sc->crypto, &cip, &auth, &ctx->sid);
+no_fallback:
+	auth.key = (uint8_t *)keys.authkey;
+	auth.key_len = keys.authkeylen;
+
+	if (!ctx->session_allocated)
+		status = nss_crypto_session_alloc(sc->crypto, &cip, &auth, &ctx->sid);
+	else
+		status = nss_crypto_session_key_update(sc->crypto, &cip, &auth, ctx->sid);
+
 	if (status != NSS_CRYPTO_STATUS_OK) {
 		nss_cfi_err("nss_crypto_session_alloc failed - status: %d\n", status);
 		ctx->sid = NSS_CRYPTO_MAX_IDXS;
@@ -342,171 +292,17 @@ int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *aead, const u8 *key, unsig
 		goto fail;
 	}
 
-	nss_cryptoapi_debugfs_add_session(sc, ctx);
-
-	nss_cfi_info("session id created: %d\n", ctx->sid);
+	if (!ctx->session_allocated) {
+		nss_cryptoapi_debugfs_add_session(sc, ctx);
+		nss_cfi_info("session id created: %d\n", ctx->sid);
+		ctx->session_allocated = true;
+	}
 
 	return 0;
 
 fail:
 	crypto_aead_set_flags(aead, flag);
-	return -EINVAL;
-}
-
-/*
- * nss_cryptoapi_sha1_3des_setkey()
- * 	Cryptoapi setkey routine for sha1/3des.
- */
-int nss_cryptoapi_sha1_3des_setkey(struct crypto_aead *aead, const u8 *key, unsigned int keylen)
-{
-	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_crypto_key cip = { .algo = NSS_CRYPTO_CIPHER_DES };
-	struct nss_crypto_key auth = { .algo = NSS_CRYPTO_AUTH_SHA1_HMAC };
-	uint32_t flag = CRYPTO_TFM_RES_BAD_KEY_LEN;
-	nss_crypto_status_t status;
-
-	/*
-	 * validate magic number - init should be called before setkey
-	 */
-	nss_cryptoapi_verify_magic(ctx);
-
-	if (atomic_cmpxchg(&ctx->refcnt, 0, 1)) {
-		nss_cfi_err("reusing context, setkey is already called\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * Extract and cipher and auth key
-	 */
-	if (nss_cryptoapi_aead_extract_key(key, keylen, &cip, &auth)) {
-		nss_cfi_err("Bad Key\n");
-		goto fail;
-	}
-
-	/*
-	 * Validate key length
-	 */
-	switch (cip.key_len) {
-	case NSS_CRYPTOAPI_KEYLEN_3DES:
-		/* success */
-		break;
-	default:
-		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
-		goto fail;
-	}
-
-	/*
-	 * Validate cipher key length
-	 */
-	switch (auth.key_len) {
-	case NSS_CRYPTO_MAX_KEYLEN_SHA1:
-		/* success */
-		break;
-	default:
-		nss_cfi_err("Bad Auth key_len(%d)\n", auth.key_len);
-		goto fail;
-	}
-
-	status = nss_crypto_session_alloc(sc->crypto, &cip, &auth, &ctx->sid);
-	if (status != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_err("nss_crypto_session_alloc failed - status: %d\n", status);
-		ctx->sid = NSS_CRYPTO_MAX_IDXS;
-		flag = CRYPTO_TFM_RES_BAD_FLAGS;
-		goto fail;
-	}
-
-	nss_cryptoapi_debugfs_add_session(sc, ctx);
-
-	nss_cfi_info("session id created: %d\n", ctx->sid);
-
-	ctx->cip_alg = NSS_CRYPTO_CIPHER_DES;
-	ctx->auth_alg = NSS_CRYPTO_AUTH_SHA1_HMAC;
-
-	return 0;
-
-fail:
-	crypto_aead_set_flags(aead, flag);
-	return -EINVAL;
-}
-
-/*
- * nss_cryptoapi_sha256_3des_setkey()
- * 	Cryptoapi setkey routine for sha256/3des.
- */
-int nss_cryptoapi_sha256_3des_setkey(struct crypto_aead *aead, const u8 *key, unsigned int keylen)
-{
-	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_crypto_key cip = { .algo = NSS_CRYPTO_CIPHER_DES };
-	struct nss_crypto_key auth = { .algo = NSS_CRYPTO_AUTH_SHA256_HMAC };
-	uint32_t flag = CRYPTO_TFM_RES_BAD_KEY_LEN;
-	nss_crypto_status_t status;
-
-	/*
-	 * validate magic number - init should be called before setkey
-	 */
-	nss_cryptoapi_verify_magic(ctx);
-
-	if (atomic_cmpxchg(&ctx->refcnt, 0, 1)) {
-		nss_cfi_err("reusing context, setkey is already called\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * Extract and cipher and auth key
-	 */
-	if (nss_cryptoapi_aead_extract_key(key, keylen, &cip, &auth)) {
-		nss_cfi_err("Bad Key\n");
-		goto fail;
-	}
-
-	/*
-	 * Validate key length
-	 */
-	switch (cip.key_len) {
-	case NSS_CRYPTOAPI_KEYLEN_3DES:
-		/* success */
-		break;
-	default:
-		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
-		goto fail;
-	}
-
-	/*
-	 * Validate cipher key length
-	 */
-	switch (auth.key_len) {
-	case NSS_CRYPTO_MAX_KEYLEN_SHA256:
-		/* success */
-		break;
-	default:
-		nss_cfi_err("Bad Auth key_len(%d)\n", auth.key_len);
-		goto fail;
-	}
-
-	status = nss_crypto_session_alloc(sc->crypto, &cip, &auth, &ctx->sid);
-	if (status != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_err("nss_crypto_session_alloc failed - status: %d\n", status);
-		ctx->sid = NSS_CRYPTO_MAX_IDXS;
-		flag = CRYPTO_TFM_RES_BAD_FLAGS;
-		goto fail;
-	}
-
-	nss_cryptoapi_debugfs_add_session(sc, ctx);
-
-	nss_cfi_info("session id created: %d\n", ctx->sid);
-
-	ctx->cip_alg = NSS_CRYPTO_CIPHER_DES;
-	ctx->auth_alg = NSS_CRYPTO_AUTH_SHA256_HMAC;
-
-	return 0;
-
-fail:
-	crypto_aead_set_flags(aead, flag);
-	return -EINVAL;
+	return ret;
 }
 
 /*
