@@ -102,52 +102,61 @@ int nss_cryptoapi_skcipher_ctx2session(struct crypto_skcipher *sk, uint32_t *sid
 EXPORT_SYMBOL(nss_cryptoapi_skcipher_ctx2session);
 
 /*
- * nss_cryptoapi_ablkcipher_init()
- * 	Cryptoapi ablkcipher init function.
+ * nss_cryptoapi_skcipher_init()
+ * 	Cryptoapi skcipher init function.
  */
-int nss_cryptoapi_ablkcipher_init(struct crypto_tfm *tfm)
+int nss_cryptoapi_skcipher_init(struct crypto_tfm *tfm)
 {
 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct crypto_ablkcipher *sw_tfm;
+	struct crypto_skcipher *skcipher = __crypto_skcipher_cast(tfm);
 
 	nss_cfi_assert(ctx);
 
+	ctx->session_allocated = false;
 	ctx->sid = NSS_CRYPTO_MAX_IDXS;
 	ctx->queued = 0;
 	ctx->completed = 0;
 	ctx->queue_failed = 0;
-	ctx->fallback_req = 0;
+	ctx->fallback_req = false;
 	ctx->sw_tfm = NULL;
-	atomic_set(&ctx->refcnt, 0);
+	ctx->is_rfc3686 = false;
+	ctx->cb_fn = nss_cryptoapi_skcipher_done;
+	atomic_set(&ctx->refcnt, 1);
 
 	nss_cryptoapi_set_magic(ctx);
 
-	if (!(crypto_tfm_alg_flags(tfm) & CRYPTO_ALG_NEED_FALLBACK))
-		return 0;
-
 	/* Alloc fallback transform for future use */
-	sw_tfm = crypto_alloc_ablkcipher(crypto_tfm_alg_name(tfm), 0, CRYPTO_ALG_ASYNC |
-									CRYPTO_ALG_NEED_FALLBACK);
-	if (IS_ERR(sw_tfm)) {
-		nss_cfi_err("unable to alloc software crypto for %s\n", crypto_tfm_alg_name(tfm));
-		return -EINVAL;
+
+	if ((tfm->__crt_alg->cra_flags) & CRYPTO_ALG_NEED_FALLBACK) {
+		skcipher = crypto_alloc_skcipher(crypto_tfm_alg_name(tfm),
+		 				0, CRYPTO_ALG_NEED_FALLBACK);
+		ctx->sw_tfm = crypto_skcipher_tfm(skcipher);
+		if (IS_ERR(ctx->sw_tfm)) {
+			nss_cfi_err("unable to alloc software crypto for %s\n",
+						crypto_tfm_alg_name(tfm));
+			ctx->sw_tfm = NULL;
+			return -EINVAL;
+		}
 	}
 
-	/* set this tfm reqsize same to fallback tfm */
-	tfm->crt_ablkcipher.reqsize = crypto_ablkcipher_reqsize(sw_tfm);
-	ctx->sw_tfm = crypto_ablkcipher_tfm(sw_tfm);
+	if (ctx->sw_tfm)
+		crypto_skcipher_set_reqsize(__crypto_skcipher_cast(tfm),
+					sizeof(struct nss_cryptoapi_sctx) +
+					crypto_skcipher_reqsize(skcipher));
+	else
+		crypto_skcipher_set_reqsize(__crypto_skcipher_cast(tfm),
+			offsetof(struct nss_cryptoapi_sctx, fallback_req));
 
 	return 0;
 }
 
 /*
- * nss_cryptoapi_ablkcipher_exit()
- * 	Cryptoapi ablkcipher exit function.
+ * nss_cryptoapi_skcipher_exit()
+ * 	Cryptoapi skcipher exit function.
  */
-void nss_cryptoapi_ablkcipher_exit(struct crypto_tfm *tfm)
+void nss_cryptoapi_skcipher_exit(struct crypto_tfm *tfm)
 {
 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct nss_cryptoapi *sc = &gbl_ctx;
 	nss_crypto_status_t status;
 
 	nss_cfi_assert(ctx);
@@ -158,22 +167,20 @@ void nss_cryptoapi_ablkcipher_exit(struct crypto_tfm *tfm)
 	}
 
 	if (ctx->sw_tfm) {
-		crypto_free_ablkcipher(__crypto_ablkcipher_cast(ctx->sw_tfm));
+		crypto_free_skcipher(__crypto_skcipher_cast(ctx->sw_tfm));
 		ctx->sw_tfm = NULL;
 	}
 
-	/*
-	 * When NSS_CRYPTO_MAX_IDXS is set, it means that fallback tfm was used
-	 * we didn't create any sessions
-	 */
-	if (ctx->sid == NSS_CRYPTO_MAX_IDXS)
-		return;
+	if (ctx->session_allocated) {
+		nss_cryptoapi_debugfs_del_session(ctx);
+		status = nss_crypto_send_session_update(ctx->sid,
+				NSS_CRYPTO_SESSION_STATE_FREE,
+				NSS_CRYPTO_CIPHER_NULL);
 
-	nss_cryptoapi_debugfs_del_session(ctx);
-
-	status = nss_crypto_session_free(sc->crypto, ctx->sid);
-	if (status != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_err("unable to free session: idx %d\n", ctx->sid);
+		if (status != NSS_CRYPTO_STATUS_OK) {
+			nss_cfi_err("unable to free session: idx %d\n", ctx->sid);
+		}
+		ctx->session_allocated = false;
 	}
 
 	nss_cryptoapi_clear_magic(ctx);
@@ -463,12 +470,13 @@ struct nss_crypto_buf *nss_cryptoapi_ablk_transform(struct ablkcipher_request *r
 }
 
 /*
- * nss_cryptoapi_ablkcipher_fallback()
- *	Cryptoapi fallback for ablkcipher algorithm.
+ * nss_cryptoapi_skcipher_fallback()
+ *	Cryptoapi fallback for skcipher algorithm.
  */
-int nss_cryptoapi_ablkcipher_fallback(struct nss_cryptoapi_ctx *ctx, struct ablkcipher_request *req, int type)
+int nss_cryptoapi_skcipher_fallback(struct nss_cryptoapi_ctx *ctx,
+					struct skcipher_request *req)
 {
-	struct crypto_ablkcipher *orig_tfm = crypto_ablkcipher_reqtfm(req);
+	struct nss_cryptoapi_sctx *rctx = skcipher_request_ctx(req);
 	int err;
 
 	if (!ctx->sw_tfm) {
@@ -476,26 +484,25 @@ int nss_cryptoapi_ablkcipher_fallback(struct nss_cryptoapi_ctx *ctx, struct ablk
 	}
 
 	/* Set new fallback tfm to the request */
-	ablkcipher_request_set_tfm(req, __crypto_ablkcipher_cast(ctx->sw_tfm));
+	skcipher_request_set_tfm(&rctx->fallback_req,
+					__crypto_skcipher_cast(ctx->sw_tfm));
+	skcipher_request_set_callback(&rctx->fallback_req,
+					req->base.flags,
+					req->base.complete,
+					req->base.data);
+	skcipher_request_set_crypt(&rctx->fallback_req, req->src,
+					req->dst, req->cryptlen, req->iv);
 
-	ctx->queued++;
-
-	switch (type) {
-	case NSS_CRYPTOAPI_ENCRYPT:
-		err = crypto_ablkcipher_encrypt(req);
+	switch (ctx->op) {
+	case NSS_CRYPTO_REQ_TYPE_ENCRYPT:
+		err = crypto_skcipher_encrypt(&rctx->fallback_req);
 		break;
-	case NSS_CRYPTOAPI_DECRYPT:
-		err = crypto_ablkcipher_decrypt(req);
+	case NSS_CRYPTO_REQ_TYPE_DECRYPT:
+		err = crypto_skcipher_decrypt(&rctx->fallback_req);
 		break;
 	default:
 		err = -EINVAL;
 	}
-
-	if (!err)
-		ctx->completed++;
-
-	/* Set original tfm to the request */
-	ablkcipher_request_set_tfm(req, orig_tfm);
 
 	return err;
 }
