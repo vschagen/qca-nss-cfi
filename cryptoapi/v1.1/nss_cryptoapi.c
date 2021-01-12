@@ -190,77 +190,74 @@ struct aead_alg cryptoapi_aead_algs[] = {
 };
 
 /*
- * ABLK cipher algorithms
+ *   skcipher cipher algorithms
  */
-static struct crypto_alg cryptoapi_ablkcipher_algs[] = {
+
+static struct skcipher_alg cryptoapi_skcipher_algs[] = {
 	{
-		.cra_name       = "cbc(aes)",
-		.cra_driver_name = "nss-cbc-aes",
-		.cra_priority   = 10000,
-		.cra_flags      = CRYPTO_ALG_TYPE_ABLKCIPHER | CRYPTO_ALG_NOSUPP_SG | CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
-		.cra_blocksize  = AES_BLOCK_SIZE,
-		.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-		.cra_alignmask  = 0,
-		.cra_type       = &crypto_ablkcipher_type,
-		.cra_module     = THIS_MODULE,
-		.cra_init       = nss_cryptoapi_ablkcipher_init,
-		.cra_exit       = nss_cryptoapi_ablkcipher_exit,
-		.cra_u          = {
-			.ablkcipher = {
-				.ivsize         = AES_BLOCK_SIZE,
-				.min_keysize    = AES_MIN_KEY_SIZE,
-				.max_keysize    = AES_MAX_KEY_SIZE,
-				.setkey         = nss_cryptoapi_ablk_aes_setkey,
-				.encrypt        = nss_cryptoapi_ablk_aes_encrypt,
-				.decrypt        = nss_cryptoapi_ablk_aes_decrypt,
-			},
+		.setkey         = nss_cryptoapi_skcipher_setkey,
+		.encrypt        = nss_cryptoapi_skcipher_encrypt,
+		.decrypt        = nss_cryptoapi_skcipher_decrypt,
+		.min_keysize    = AES_MIN_KEY_SIZE,
+		.max_keysize    = AES_MAX_KEY_SIZE,
+		.ivsize         = AES_BLOCK_SIZE,
+		.base = {
+			.cra_name       = "cbc(aes)",
+			.cra_driver_name = "nss-cbc-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = AES_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0xf,
+			.cra_module     = THIS_MODULE,
+			.cra_init       = nss_cryptoapi_skcipher_init,
+			.cra_exit       = nss_cryptoapi_skcipher_exit,
+
 		},
 	},
 	{
-		.cra_name       = "rfc3686(ctr(aes))",
-		.cra_driver_name = "nss-rfc3686-ctr-aes",
-		.cra_priority   = 30000,
-		.cra_flags      = CRYPTO_ALG_TYPE_ABLKCIPHER | CRYPTO_ALG_NOSUPP_SG | CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK,
-		.cra_blocksize  = AES_BLOCK_SIZE,
-		.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-		.cra_alignmask  = 0,
-		.cra_type       = &crypto_ablkcipher_type,
-		.cra_module     = THIS_MODULE,
-		.cra_init       = nss_cryptoapi_ablkcipher_init,
-		.cra_exit       = nss_cryptoapi_ablkcipher_exit,
-		.cra_u          = {
-			.ablkcipher = {
-				.ivsize         = CTR_RFC3686_IV_SIZE,
-				.geniv          = "seqiv",
-				.min_keysize    = AES_MIN_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
-				.max_keysize    = AES_MAX_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
-				.setkey         = nss_cryptoapi_ablk_aes_setkey,
-				.encrypt        = nss_cryptoapi_ablk_aes_encrypt,
-				.decrypt        = nss_cryptoapi_ablk_aes_decrypt,
-			},
+		.setkey         = nss_cryptoapi_skcipher_setkey,
+		.encrypt        = nss_cryptoapi_skcipher_encrypt,
+		.decrypt        = nss_cryptoapi_skcipher_decrypt,
+		.ivsize         = CTR_RFC3686_IV_SIZE,
+		.min_keysize    = AES_MIN_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
+		.max_keysize    = AES_MAX_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
+		.base = {
+			.cra_name       = "rfc3686(ctr(aes))",
+			.cra_driver_name = "nss-rfc3686-ctr-aes",
+			.cra_priority   = 30000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = 1,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0xf,
+			.cra_module     = THIS_MODULE,
+			.cra_init       = nss_cryptoapi_skcipher_init,
+			.cra_exit       = nss_cryptoapi_skcipher_exit,
 		},
 	},
 	{
-		.cra_name       = "cbc(des3_ede)",
-		.cra_driver_name = "nss-cbc-3des",
-		.cra_priority   = 1000,
-		.cra_flags      = CRYPTO_ALG_TYPE_ABLKCIPHER | CRYPTO_ALG_NOSUPP_SG | CRYPTO_ALG_ASYNC,
-		.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
-		.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-		.cra_alignmask  = 0,
-		.cra_type       = &crypto_ablkcipher_type,
-		.cra_module     = THIS_MODULE,
-		.cra_init       = nss_cryptoapi_ablkcipher_init,
-		.cra_exit       = nss_cryptoapi_ablkcipher_exit,
-		.cra_u          = {
-			.ablkcipher = {
-				.ivsize         = DES3_EDE_BLOCK_SIZE,
-				.min_keysize    = DES3_EDE_KEY_SIZE,
-				.max_keysize    = DES3_EDE_KEY_SIZE,
-				.setkey         = nss_cryptoapi_3des_cbc_setkey,
-				.encrypt        = nss_cryptoapi_3des_cbc_encrypt,
-				.decrypt        = nss_cryptoapi_3des_cbc_decrypt,
-			},
+		.setkey         = nss_cryptoapi_skcipher_setkey,
+		.encrypt        = nss_cryptoapi_skcipher_encrypt,
+		.decrypt        = nss_cryptoapi_skcipher_decrypt,
+		.ivsize         = DES3_EDE_BLOCK_SIZE,
+		.min_keysize    = DES3_EDE_KEY_SIZE,
+		.max_keysize    = DES3_EDE_KEY_SIZE,
+		.base = {
+			.cra_name       = "cbc(des3_ede)",
+			.cra_driver_name = "nss-cbc-3des",
+			.cra_priority   = 1000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+			.cra_init       = nss_cryptoapi_skcipher_init,
+			.cra_exit       = nss_cryptoapi_skcipher_exit,
 		},
 	},
 };
@@ -278,14 +275,16 @@ static nss_crypto_user_ctx_t nss_cryptoapi_register(nss_crypto_handle_t crypto)
 
 	sc->crypto = crypto;
 
-	for (i = 0; i < ARRAY_SIZE(cryptoapi_ablkcipher_algs); i++) {
-		rc = crypto_register_alg(&cryptoapi_ablkcipher_algs[i]);
+	for (i = 0; i < ARRAY_SIZE(cryptoapi_skcipher_algs); i++) {
+		rc = crypto_register_skcipher(&cryptoapi_skcipher_algs[i]);
 		if (rc) {
-			nss_cfi_trace("Ablk registration failed, algo: %s\n", cryptoapi_ablkcipher_algs[i].cra_name);
-			cryptoapi_ablkcipher_algs[i].cra_flags = 0;
+			nss_cfi_trace("Skcipher registration failed, algo: %s\n"
+				, cryptoapi_skcipher_algs[i].base.cra_name);
+			cryptoapi_skcipher_algs[i].base.cra_flags = 0;
 			continue;
 		}
-		nss_cfi_info("Ablk registration succeeded, algo: %s\n", cryptoapi_ablkcipher_algs[i].cra_name);
+		nss_cfi_info("Skcipher registration succeeded, algo: %s\n",
+				cryptoapi_skcipher_algs[i].base.cra_name);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(cryptoapi_aead_algs); i++) {
@@ -327,16 +326,14 @@ static void nss_cryptoapi_unregister(nss_crypto_user_ctx_t cfi)
 	 */
 	atomic_set(&gbl_ctx.registered, 0);
 
-	for (i = 0; i < ARRAY_SIZE(cryptoapi_ablkcipher_algs); i++) {
-		if (!cryptoapi_ablkcipher_algs[i].cra_flags) {
+
+	for (i = 0; i < ARRAY_SIZE(cryptoapi_skcipher_algs); i++) {
+		if (!cryptoapi_skcipher_algs[i].base.cra_flags) {
 			continue;
 		}
-		ret = crypto_unregister_alg(&cryptoapi_ablkcipher_algs[i]);
-		if (ret) {
-			nss_cfi_err("Ablk unregister failed, algo: %s\n", cryptoapi_ablkcipher_algs[i].cra_name);
-			continue;
-		}
-		nss_cfi_info("Ablk unregister succeeded, algo: %s\n", cryptoapi_ablkcipher_algs[i].cra_name);
+		crypto_unregister_skcipher(&cryptoapi_skcipher_algs[i]);
+		nss_cfi_info("Skcipher unregister succeeded, algo: %s\n",
+				cryptoapi_skcipher_algs[i].base.cra_name);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(cryptoapi_aead_algs); i++) {
