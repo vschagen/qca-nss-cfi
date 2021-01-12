@@ -187,15 +187,16 @@ void nss_cryptoapi_skcipher_exit(struct crypto_tfm *tfm)
 }
 
 /*
- * nss_cryptoapi_ablk_aes_setkey()
- * 	Cryptoapi setkey routine for aes.
+ * nss_cryptoapi_skcipher_setkey()
+ * 	Cryptoapi setkey routine.
  */
-int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int keylen)
+int nss_cryptoapi_skcipher_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int keylen)
 {
-	struct crypto_tfm *tfm = crypto_ablkcipher_tfm(cipher);
+	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
 	struct nss_cryptoapi *sc = &gbl_ctx;
 	struct nss_crypto_key cip;
+	struct crypto_aes_ctx aes;
 	uint32_t flag = CRYPTO_TFM_RES_BAD_KEY_LEN;
 	nss_crypto_status_t status;
 	int ret;
@@ -204,11 +205,7 @@ int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *ke
 	 * validate magic number - init should be called before setkey
 	 */
 	nss_cryptoapi_verify_magic(ctx);
-
-	if (atomic_cmpxchg(&ctx->refcnt, 0, 1)) {
-		nss_cfi_err("reusing context, setkey is already called\n");
-		return -EINVAL;
-	}
+	ctx->blksize = crypto_tfm_alg_blocksize(tfm);
 
 	/*
 	 * set cipher key
@@ -221,6 +218,8 @@ int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *ke
 	 */
 	if (!strncmp("nss-rfc3686-ctr-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CTR;
+		ctx->is_rfc3686 = true;
+		ctx->blksize = AES_BLOCK_SIZE;
 
 		/*
 		 * For RFC3686 CTR mode we construct the IV such that
@@ -228,13 +227,21 @@ int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *ke
 		 * - Second & third word set to the IV provided by seqiv
 		 * - Last word set to counter '1'
 		 */
+		if (cip.key_len < CTR_RFC3686_NONCE_SIZE)
+			goto fail;
+
 		cip.key_len = cip.key_len - CTR_RFC3686_NONCE_SIZE;
-
-		ctx->ctx_iv[0] = *(uint32_t *)(cip.key + cip.key_len);
-		ctx->ctx_iv[3] = ntohl(0x1);
-
+		ctx->nonce = *(uint32_t *)(cip.key + cip.key_len);
 	} else if (!strncmp("nss-cbc-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
 		cip.algo = NSS_CRYPTO_CIPHER_AES_CBC;
+	} else if (!strncmp("nss-ctr-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
+		cip.algo = NSS_CRYPTO_CIPHER_AES_CTR;
+		ctx->is_rfc3686 = false;
+		ctx->blksize = AES_BLOCK_SIZE;
+	} else if (!strncmp("nss-ecb-aes", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
+		cip.algo = NSS_CRYPTO_CIPHER_AES_ECB;
+	} else if (!strncmp("nss-cbc-3des", crypto_tfm_alg_driver_name(tfm), CRYPTO_MAX_ALG_NAME)) {
+		cip.algo = NSS_CRYPTO_CIPHER_DES;
 	} else
 		goto fail;
 
@@ -243,45 +250,61 @@ int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *ke
 	/*
 	 * Validate cipher key length
 	 */
+	switch (ctx->cip_alg) {
+	case NSS_CRYPTO_CIPHER_AES_ECB:
+	case NSS_CRYPTO_CIPHER_AES_CBC:
+	case NSS_CRYPTO_CIPHER_AES_CTR:
+		ret = aes_expandkey(&aes, cip.key, cip.key_len);
+		break;
+	case NSS_CRYPTO_CIPHER_DES:
+		ret = verify_skcipher_des3_key(cipher, cip.key);
+		if (ret)
+			goto fail;
+		ctx->fallback_req = false;
+		goto skip_fallback;
+	default:
+		ret = -EINVAL;
+	}
+	if (ret)
+		goto fail;
+
 	switch (cip.key_len) {
-	case NSS_CRYPTOAPI_KEYLEN_AES128:
-	case NSS_CRYPTOAPI_KEYLEN_AES256:
+	case AES_KEYSIZE_128:
+	case AES_KEYSIZE_256:
 		/* success */
 		ctx->fallback_req = false;
 		break;
-	case NSS_CRYPTOAPI_KEYLEN_AES192:
+	case AES_KEYSIZE_192:
 		/*
 		 * AES192 is not supported by hardware, falling back to software
 		 * crypto.
 		 */
-		if (!ctx->sw_tfm) {
-			goto fail;
-		}
 		ctx->fallback_req = true;
-		ctx->sid = NSS_CRYPTO_MAX_IDXS;
-
-		/* set flag to fallback tfm */
-		crypto_tfm_clear_flags(ctx->sw_tfm, CRYPTO_TFM_REQ_MASK);
-		crypto_tfm_set_flags(ctx->sw_tfm, crypto_ablkcipher_get_flags(cipher) & CRYPTO_TFM_REQ_MASK);
-
-		 /* Set key to the fallback tfm */
-		ret = crypto_ablkcipher_setkey(__crypto_ablkcipher_cast(ctx->sw_tfm), key, keylen);
-		if (ret) {
-			nss_cfi_err("Failed to set key to the sw crypto");
-
-			/*
-			 * Set back the fallback tfm flag to the original flag one after
-			 * doing setkey
-			 */
-			crypto_ablkcipher_set_flags(cipher, crypto_tfm_get_flags(ctx->sw_tfm));
-		}
-		return ret;
+		break;
 	default:
 		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
 		goto fail;
 	}
 
-	status = nss_crypto_session_alloc(sc->crypto, &cip, NULL, &ctx->sid);
+	if ((ctx->fallback_req) && (!ctx->sw_tfm))
+			goto fail;
+
+	if (ctx->sw_tfm) {
+		 /* Set key to the fallback tfm */
+		ret = crypto_skcipher_setkey(__crypto_skcipher_cast(ctx->sw_tfm), key, keylen);
+		if (ret)
+			nss_cfi_err("Failed to set key to the sw crypto");
+
+		if (ctx->fallback_req)
+			return ret;
+	}
+
+skip_fallback:
+	if (!ctx->session_allocated)
+		status = nss_crypto_session_alloc(sc->crypto, &cip, NULL, &ctx->sid);
+	else
+		status = nss_crypto_session_key_update(sc->crypto, &cip, NULL, ctx->sid);
+
 	if (status != NSS_CRYPTO_STATUS_OK) {
 		nss_cfi_err("nss_crypto_session_alloc failed - status: %d\n", status);
 		ctx->sid = NSS_CRYPTO_MAX_IDXS;
@@ -289,14 +312,17 @@ int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *ke
 		goto fail;
 	}
 
-	nss_cryptoapi_debugfs_add_session(sc, ctx);
+	if (!ctx->session_allocated) {
+		nss_cryptoapi_debugfs_add_session(sc, ctx);
+		nss_cfi_info("session id created: %d\n", ctx->sid);
+	}
 
-	nss_cfi_info("session id created: %d\n", ctx->sid);
+	ctx->session_allocated = true;
 
 	return 0;
 
 fail:
-	crypto_ablkcipher_set_flags(cipher, flag);
+	crypto_skcipher_set_flags(cipher, flag);
 	return -EINVAL;
 }
 
@@ -639,69 +665,6 @@ int nss_cryptoapi_ablk_aes_decrypt(struct ablkcipher_request *req)
 	atomic_inc(&ctx->refcnt);
 
 	return -EINPROGRESS;
-}
-
-/*
- * nss_cryptoapi_3des_cbc_setkey()
- * 	Cryptoapi DES3 CBC setkey function.
- */
-int nss_cryptoapi_3des_cbc_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int keylen)
-{
-	struct crypto_tfm *tfm = crypto_ablkcipher_tfm(cipher);
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_crypto_key cip = { .algo = NSS_CRYPTO_CIPHER_DES };
-	struct nss_crypto_key *cip_ptr = &cip;
-	uint32_t flag = CRYPTO_TFM_RES_BAD_KEY_LEN;
-	nss_crypto_status_t status;
-
-	/*
-	 * validate magic number - init should be called before setkey
-	 */
-	nss_cryptoapi_verify_magic(ctx);
-
-	if (atomic_cmpxchg(&ctx->refcnt, 0, 1)) {
-		nss_cfi_err("reusing context, setkey is already called\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * set cipher key
-	 */
-	cip.key = (uint8_t *)key;
-	cip.key_len = keylen;
-
-	/*
-	 * Validate key length
-	 */
-	switch (cip.key_len) {
-	case NSS_CRYPTOAPI_KEYLEN_3DES:
-		/* success */
-		break;
-	default:
-		nss_cfi_err("Bad Cipher key_len(%d)\n", cip.key_len);
-		goto fail;
-	}
-
-	status = nss_crypto_session_alloc(sc->crypto, cip_ptr, NULL, &ctx->sid);
-	if (status != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_err("nss_crypto_session_alloc failed - status: %d\n", status);
-		ctx->sid = NSS_CRYPTO_MAX_IDXS;
-		flag = CRYPTO_TFM_RES_BAD_FLAGS;
-		goto fail;
-	}
-
-	nss_cryptoapi_debugfs_add_session(sc, ctx);
-
-	nss_cfi_info("session id created: %d\n", ctx->sid);
-
-	ctx->cip_alg = NSS_CRYPTO_CIPHER_DES;
-
-	return 0;
-
-fail:
-	crypto_ablkcipher_set_flags(cipher, flag);
-	return -EINVAL;
 }
 
 /*
