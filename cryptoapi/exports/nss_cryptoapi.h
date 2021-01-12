@@ -68,4 +68,11 @@ int nss_cryptoapi_ahash_ctx2session(struct crypto_ahash *ahash, uint32_t *sid);
  */
 bool nss_cryptoapi_is_registered(void);
 
+/*
+ * nss_crypto_send_session_update()
+ * 	reset session specific state (alloc or free)
+ */
+nss_crypto_status_t nss_crypto_send_session_update(uint32_t session_idx, enum nss_crypto_session_state state, enum nss_crypto_cipher algo);
+
+
 #endif /* !__NSS_CRYPTOAPI_H */
