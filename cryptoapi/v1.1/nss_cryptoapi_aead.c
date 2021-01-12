@@ -629,32 +629,36 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
  * nss_cryptoapi_aead_fallback()
  *	Cryptoapi fallback for aes algorithm.
  */
-int nss_cryptoapi_aead_fallback(struct nss_cryptoapi_ctx *ctx, struct aead_request *req, int type)
+int nss_cryptoapi_aead_fallback(struct nss_cryptoapi_ctx *ctx, struct aead_request *req)
 {
-	struct crypto_aead *orig_tfm = crypto_aead_reqtfm(req);
+	struct nss_cryptoapi_actx *rctx = aead_request_ctx(req);
 	int err;
 
-	nss_cfi_assert(ctx->sw_tfm);
+	if (!ctx->sw_tfm) {
+		return -EINVAL;
+	}
 
-	aead_request_set_tfm(req, __crypto_aead_cast(ctx->sw_tfm));
+	/* Set new fallback tfm to the request */
+	aead_request_set_tfm(&rctx->fallback_req, __crypto_aead_cast(ctx->sw_tfm));
+	aead_request_set_callback(&rctx->fallback_req,
+					req->base.flags,
+					req->base.complete,
+					req->base.data);
 
-	ctx->queued++;
+	aead_request_set_crypt(&rctx->fallback_req, req->src,
+					req->dst, req->cryptlen, req->iv);
+	aead_request_set_ad(&rctx->fallback_req, req->assoclen);
 
-	switch (type) {
-	case NSS_CRYPTOAPI_ENCRYPT:
-		err = crypto_aead_encrypt(req);
+	switch (ctx->op) {
+	case NSS_CRYPTO_REQ_TYPE_ENCRYPT:
+		err = crypto_aead_encrypt(&rctx->fallback_req);
 		break;
-	case NSS_CRYPTOAPI_DECRYPT:
-		err = crypto_aead_decrypt(req);
+	case NSS_CRYPTO_REQ_TYPE_DECRYPT:
+		err = crypto_aead_decrypt(&rctx->fallback_req);
 		break;
 	default:
 		err = -EINVAL;
 	}
-
-	if (!err)
-		ctx->completed++;
-
-	aead_request_set_tfm(req, orig_tfm);
 
 	return err;
 }
