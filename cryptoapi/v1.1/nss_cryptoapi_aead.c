@@ -369,12 +369,12 @@ void nss_cryptoapi_aead_done(struct nss_crypto_buf *buf)
 	}
 
 	if (rctx->sg_src != req->src)
-		nss_cryptoapi_free_sg_cpy(src_len, &rctx->sg_src);
+		nss_cryptoapi_free_sg_copy(src_len, &rctx->sg_src);
 
 	if (rctx->sg_dst != req->dst) {
 		sg_copy_from_buffer(req->dst, sg_nents(req->dst),
 				sg_virt(rctx->sg_dst), dst_len);
-		nss_cryptoapi_free_sg_cpy(dst_len, &rctx->sg_dst);
+		nss_cryptoapi_free_sg_copy(dst_len, &rctx->sg_dst);
 	}
 
 	nss_crypto_buf_free(gbl_ctx.crypto, buf);
@@ -446,7 +446,7 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req,
 	}
 
 	if (!src_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_src, &rctx->sg_src,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_src, &rctx->sg_src,
 					totlen_src, true);
 		if (err)
 			return NULL; //err;
@@ -454,7 +454,7 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req,
 	}
 
 	if (!dst_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_dst, &rctx->sg_dst,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_dst, &rctx->sg_dst,
 					totlen_dst, false);
 		if (err)
 			return NULL; //err;

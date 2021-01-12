@@ -220,12 +220,12 @@ void nss_cryptoapi_skcipher_done(struct nss_crypto_buf *buf)
 			memcpy(req->iv, bufctx->iv_addr, rctx->iv_size);
 	}
 	if (rctx->sg_src != req->src)
-		nss_cryptoapi_free_sg_cpy(req->cryptlen, &rctx->sg_src);
+		nss_cryptoapi_free_sg_copy(req->cryptlen, &rctx->sg_src);
 
 	if (rctx->sg_dst != req->dst) {
 		sg_copy_from_buffer(req->dst, sg_nents(req->dst),
 				sg_virt(rctx->sg_dst), req->cryptlen);
-		nss_cryptoapi_free_sg_cpy(req->cryptlen, &rctx->sg_dst);
+		nss_cryptoapi_free_sg_copy(req->cryptlen, &rctx->sg_dst);
 	}
 
 	nss_cfi_dbg("after transformation\n");
@@ -689,7 +689,7 @@ static int nss_cryptoapi_send_req(struct skcipher_request *req, struct nss_crypt
 	}
 
 	if (!src_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_src, &rctx->sg_src,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_src, &rctx->sg_src,
 					req->cryptlen, true);
 		if (err)
 			return err;
@@ -697,7 +697,7 @@ static int nss_cryptoapi_send_req(struct skcipher_request *req, struct nss_crypt
 	}
 
 	if (!dst_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_dst, &rctx->sg_dst,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_dst, &rctx->sg_dst,
 					req->cryptlen, false);
 		if (err)
 			return err;
