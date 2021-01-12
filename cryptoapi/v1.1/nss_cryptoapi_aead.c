@@ -22,30 +22,28 @@
  * 	to Crypto core specific data
  */
 
-#include <linux/version.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/random.h>
-#include <crypto/internal/aead.h>
-#include <linux/moduleparam.h>
-#include <linux/spinlock.h>
 #include <asm/cmpxchg.h>
-#include <linux/delay.h>
 #include <linux/crypto.h>
-#include <linux/rtnetlink.h>
 #include <linux/debugfs.h>
+#include <linux/delay.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/random.h>
+#include <linux/rtnetlink.h>
+#include <linux/spinlock.h>
+#include <linux/version.h>
 
-#include <crypto/ctr.h>
-#include <crypto/des.h>
+#include <crypto/internal/aead.h>
+#include <crypto/internal/des.h>
+#include <crypto/internal/skcipher.h>
 #include <crypto/aes.h>
+#include <crypto/algapi.h>
+#include <crypto/authenc.h>
+#include <crypto/ctr.h>
 #include <crypto/sha.h>
 #include <crypto/hash.h>
-#include <crypto/algapi.h>
-#include <crypto/aead.h>
-#include <crypto/authenc.h>
 #include <crypto/scatterwalk.h>
-#include <crypto/internal/skcipher.h>
-#include <crypto/internal/des.h>
 
 #include <nss_api_if.h>
 #include <nss_crypto_if.h>
