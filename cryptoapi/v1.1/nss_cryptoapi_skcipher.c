@@ -43,6 +43,7 @@
 #include <crypto/authenc.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/internal/skcipher.h>
+#include <crypto/internal/des.h>
 
 #include <nss_api_if.h>
 #include <nss_crypto_if.h>
