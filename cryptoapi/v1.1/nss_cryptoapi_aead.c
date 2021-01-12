@@ -326,89 +326,60 @@ int nss_cryptoapi_aead_setauthsize(struct crypto_aead *authenc, unsigned int aut
 }
 
 /*
- * nss_cryptoapi_aead_decrypt_done()
- * 	Cipher/Auth decrypt request completion callback function
+ * nss_cryptoapi_aead_done()
+ * 	Cipher/Auth request completion callback function
  */
-void nss_cryptoapi_aead_decrypt_done(struct nss_crypto_buf *buf)
+void nss_cryptoapi_aead_done(struct nss_crypto_buf *buf)
 {
 	struct nss_cryptoapi_ctx *ctx;
 	struct aead_request *req;
-	struct crypto_aead *aead;
+	struct nss_cryptoapi_actx *rctx;
 	uint8_t *data_hmac;
 	uint8_t *hw_hmac;
-	uint32_t hmac_sz;
-	uint16_t tot_len;
+	uint16_t src_len, dst_len;
 	int err = 0;
 	uint8_t *data;
 
 	nss_cfi_assert(buf);
 
 	req = (struct aead_request *)nss_crypto_get_cb_ctx(buf);
-	aead = crypto_aead_reqtfm(req);
+	rctx = aead_request_ctx(req);
+	ctx = crypto_tfm_ctx(req->base.tfm);
 
 	/*
 	 * check cryptoapi context magic number.
 	 */
-	ctx = crypto_aead_ctx(aead);
 	nss_cryptoapi_verify_magic(ctx);
 
-	data = sg_virt(req->src);
-	tot_len = req->assoclen + req->cryptlen;
-
-	hmac_sz = crypto_aead_authsize(aead);
 	hw_hmac = nss_crypto_get_hash_addr(buf);
-	data_hmac = data + tot_len - hmac_sz;
 
-	if (memcmp(hw_hmac, data_hmac, hmac_sz)) {
-		err = -EBADMSG;
-		nss_cfi_err("HMAC comparison failed\n");
+	if (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT) {
+		src_len = req->assoclen + req->cryptlen;
+		dst_len = src_len + ctx->authsize;
+		data = sg_virt(rctx->sg_dst);
+		memcpy(data + src_len, hw_hmac, ctx->authsize);
+	} else {
+		dst_len = req->assoclen + req->cryptlen;
+		src_len = dst_len - ctx->authsize;
+		data = sg_virt(rctx->sg_src);
+		data_hmac = data + src_len;
+		if (memcmp(hw_hmac, data_hmac, ctx->authsize)) {
+			err = -EBADMSG;
+			nss_cfi_err("HMAC comparison failed\n");
+		}
+	}
+
+	if (rctx->sg_src != req->src)
+		nss_cryptoapi_free_sg_cpy(src_len, &rctx->sg_src);
+
+	if (rctx->sg_dst != req->dst) {
+		sg_copy_from_buffer(req->dst, sg_nents(req->dst),
+				sg_virt(rctx->sg_dst), dst_len);
+		nss_cryptoapi_free_sg_cpy(dst_len, &rctx->sg_dst);
 	}
 
 	nss_crypto_buf_free(gbl_ctx.crypto, buf);
-	aead_request_complete(req, err);
 
-	nss_cfi_assert(atomic_read(&ctx->refcnt));
-	atomic_dec(&ctx->refcnt);
-	ctx->completed++;
-}
-
-/*
- * nss_cryptoapi_aead_encrypt_done()
- * 	Cipher/Auth encrypt request completion callback function
- */
-void nss_cryptoapi_aead_encrypt_done(struct nss_crypto_buf *buf)
-{
-	struct nss_cryptoapi_ctx *ctx;
-	struct aead_request *req;
-	struct crypto_aead *aead;
-	uint8_t *hw_hmac;
-	uint16_t tot_len;
-	int err = 0;
-	uint8_t *data;
-
-	nss_cfi_assert(buf);
-
-	req = (struct aead_request *)nss_crypto_get_cb_ctx(buf);
-	aead = crypto_aead_reqtfm(req);
-
-	/*
-	 * check cryptoapi context magic number.
-	 */
-	ctx = crypto_aead_ctx(aead);
-	nss_cryptoapi_verify_magic(ctx);
-
-	data = sg_virt(req->src);
-	tot_len = req->assoclen + req->cryptlen;
-
-	hw_hmac = nss_crypto_get_hash_addr(buf);
-	memcpy(data + tot_len, hw_hmac, crypto_aead_authsize(aead));
-
-	nss_crypto_buf_free(gbl_ctx.crypto, buf);
-
-	/*
-	 * Passing always pass in case of encrypt.
-	 * Perhaps whenever core crypto invokes callback routine, it is always pass.
-	 */
 	aead_request_complete(req, err);
 
 	nss_cfi_assert(atomic_read(&ctx->refcnt));
