@@ -651,38 +651,6 @@ skipiv:
 }
 
 /*
- * nss_cryptoapi_ablk_checkaddr()
- * 	Cryptoapi: obtain sg to virtual address mapping.
- * 	Check for multiple sg in src and dst
- */
-int nss_cryptoapi_ablk_checkaddr(struct ablkcipher_request *req)
-{
-	/*
-	 * Currently only single sg is supported
-	 * 	return error, if caller send multiple sg for any of src and dst.
-	 */
-	if (nss_cryptoapi_sg_has_frags(req->src)) {
-		nss_cfi_err("Only single sg supported: src invalid\n");
-		return -EINVAL;
-	}
-
-	if (nss_cryptoapi_sg_has_frags(req->dst)) {
-		nss_cfi_err("Only single sg supported: dst invalid\n");
-		return -EINVAL;
-	}
-
-	/*
-	 * If the size of data is more than 65K reject transformation
-	 */
-	if (req->nbytes > NSS_CRYPTOAPI_MAX_DATA_LEN) {
-		nss_cfi_err("Buffer length exceeded limit\n");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-/*
  * nss_cryptoapi_send_req()
  * 	Send request. Replaces transform function.
  */
