@@ -500,50 +500,83 @@ int nss_cryptoapi_checknget_addr(struct aead_request *req, struct nss_cryptoapi_
  * nss_cryptoapi_aead_transform()
  * 	Crytoapi common routine for encryption and decryption operations.
  */
-struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, struct nss_cryptoapi_aead_info *info)
+struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req,
+		struct nss_cryptoapi_aead_info *info)
 {
 	struct crypto_aead *aead = crypto_aead_reqtfm(req);
 	struct nss_cryptoapi_ctx *ctx = crypto_aead_ctx(aead);
+	struct nss_cryptoapi_actx *rctx = aead_request_ctx(req);
 	struct nss_crypto_buf *buf;
-	struct nss_cryptoapi_addr sg_addr = {0};
 	struct nss_cryptoapi *sc = &gbl_ctx;
 	nss_crypto_status_t status;
-	int tot_buf_len;
+	int tot_buf_len	= req->assoclen + req->cryptlen;
+	uint32_t totlen_src = tot_buf_len;
+	uint32_t totlen_dst = tot_buf_len;
+	struct scatterlist *src;
+	struct scatterlist *dst;
+	int src_nents, dst_nents;
+	bool src_align = true, dst_align = true;
+	int err;
 	uint32_t iv_size;
 	uint16_t cipher_len = 0, auth_len = 0;
 	uint8_t *iv_addr;
 
 	nss_cfi_assert(ctx);
 
-	/*
-	 * According to RFC3686, AES-CTR algo need not be padded if the
-	 * plaintext or ciphertext is unaligned to block size boundary.
-	 */
-	if ((info->cip_len & (crypto_aead_blocksize(aead) - 1)) && (ctx->cip_alg != NSS_CRYPTO_CIPHER_AES_CTR)) {
-		nss_cfi_dbg("Invalid cipher len - Not aligned to algo blocksize\n");
-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
+	rctx->sg_src = req->src;
+	src = req->src;
+	rctx->sg_dst = req->dst;
+	dst = req->dst;
+
+	if (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT)
+		totlen_dst += ctx->authsize;
+	else
+		totlen_src += ctx->authsize;
+
+	if ((totlen_src > NSS_CRYPTOAPI_MAX_DATA_LEN) ||
+		(totlen_dst > NSS_CRYPTOAPI_MAX_DATA_LEN)) {
+		nss_cfi_err("Requested crypto buffer is to big\n");
 		return NULL;
 	}
 
-	/*
-	 * Map sg to corresponding virtual addesses.
-	 * validate if addresses are valid as expected and sg has single fragment.
-	 */
-	if (nss_cryptoapi_checknget_addr(req, &sg_addr)) {
-		nss_cfi_err("Invalid address!!\n");
-		return NULL;
+	src_nents = sg_nents_for_len(src, totlen_src);
+	dst_nents = sg_nents_for_len(dst, totlen_dst);
+
+	if (dst_nents == 1 && src_nents == 1) {
+		src_align = nss_cryptoapi_is_sg_aligned(src, totlen_src,
+								ctx->blksize);
+		if (src ==  dst)
+			dst_align = src_align;
+		else
+			dst_align = nss_cryptoapi_is_sg_aligned(dst, totlen_dst,
+				 				ctx->blksize);
+	} else {
+		src_align = false;
+		dst_align = false;
 	}
 
-	nss_cfi_dbg("src_vaddr: 0x%p, dst_vaddr: 0x%p, iv: 0x%p\n",
-			sg_addr.src, sg_addr.dst, req->iv);
+	if (!src_align) {
+		err = nss_cryptoapi_make_sg_cpy(rctx->sg_src, &rctx->sg_src,
+					totlen_src, true);
+		if (err)
+			return NULL; //err;
+		src = rctx->sg_src;
+	}
 
-	iv_size = crypto_aead_ivsize(aead);
+	if (!dst_align) {
+		err = nss_cryptoapi_make_sg_cpy(rctx->sg_dst, &rctx->sg_dst,
+					totlen_dst, false);
+		if (err)
+			return NULL; //err;
+
+		dst = rctx->sg_dst;
+	}
 
 	/*
 	 * The new AEAD interface starts from the point where the data is be authenticated.
 	 */
 	info->params->auth_skip = 0;
-	info->params->cipher_skip = iv_size + req->assoclen;
+	info->params->cipher_skip = req->assoclen;
 
 	/*
 	 * Update the crypto session data
@@ -573,6 +606,7 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
 	 * Get IV location and memcpy the IV.
 	 * For all AES algos, copy IV of size AES_BLOCK_SIZE.
 	 */
+	iv_size = crypto_aead_ivsize(aead);
 	iv_addr = nss_crypto_get_ivaddr(buf);
 
 	switch (ctx->cip_alg) {
@@ -580,14 +614,12 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
 	case NSS_CRYPTO_CIPHER_DES:
 		memcpy(iv_addr, req->iv, iv_size);
 		break;
-
 	case NSS_CRYPTO_CIPHER_AES_CTR:
-		((uint32_t *)iv_addr)[0] = ctx->ctx_iv[0];
+		((uint32_t *)iv_addr)[0] = ctx->nonce;
 		((uint32_t *)iv_addr)[1] = ((uint32_t *)req->iv)[0];
 		((uint32_t *)iv_addr)[2] = ((uint32_t *)req->iv)[1];
-		((uint32_t *)iv_addr)[3] = ctx->ctx_iv[3];
+		((uint32_t *)iv_addr)[3] = htonl(0x1);
 		break;
-
 	default:
 		/*
 		 * Should never happen
@@ -612,10 +644,10 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
 	 * The physical buffer data length provided to crypto will include
 	 * space for authentication hash
 	 */
-	nss_crypto_set_data(buf, sg_addr.start, sg_addr.start, tot_buf_len);
+	nss_crypto_set_data(buf, sg_virt(src), sg_virt(dst), tot_buf_len);
 	nss_crypto_set_transform_len(buf, cipher_len, auth_len);
 
-	nss_cfi_dbg("cipher_len: %d, iv_len: %d, auth_len: %d"
+	nss_cfi_dbg("cipher_len: %d, iv_len: %d, auth_len: %d "
 			"tot_buf_len: %d, sha: %d, cipher_skip: %d, auth_skip: %d\n",
 			buf->cipher_len, iv_size, buf->auth_len,
 			tot_buf_len, crypto_aead_authsize(aead), info->params->cipher_skip, info->params->auth_skip);
