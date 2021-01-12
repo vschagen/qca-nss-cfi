@@ -102,6 +102,80 @@ int nss_cryptoapi_skcipher_ctx2session(struct crypto_skcipher *sk, uint32_t *sid
 EXPORT_SYMBOL(nss_cryptoapi_skcipher_ctx2session);
 
 /*
+ * nss_cryptoapi_free_sg_copy()
+ * 	Free scatterlist copy.
+ */
+inline void nss_cryptoapi_free_sg_copy(const int len, struct scatterlist **sg)
+{
+	if (!*sg || !len)
+		return;
+
+	free_pages((unsigned long)sg_virt(*sg), get_order(len));
+	kfree(*sg);
+	*sg = NULL;
+}
+/*
+ * nss_cryptoapi_free_sg_copy()
+ * 	Make scatterlist copy.
+ */
+inline int nss_cryptoapi_make_sg_copy(struct scatterlist *src,
+		struct scatterlist **dst, int len, const bool copy)
+{
+	void *pages;
+
+	*dst = kmalloc(sizeof(**dst), GFP_KERNEL);
+	if (!*dst) {
+		nss_cfi_err("No memory to make a copy of scatterlist\n");
+		return -ENOMEM;
+	}
+
+	pages = (void *)__get_free_pages(GFP_KERNEL | GFP_DMA,
+					get_order(len));
+
+	if (!pages) {
+		kfree(*dst);
+		*dst = NULL;
+		nss_cfi_err("no free pages\n");
+		return -ENOMEM;
+	}
+
+	sg_init_table(*dst, 1);
+	sg_set_buf(*dst, pages, len);
+
+	if (copy)
+		sg_copy_to_buffer(src, sg_nents(src), pages, len);
+
+	return 0;
+}
+/*
+ * nss_cryptoapi_is_sg_aligned()
+ * 	Verify if scatterlist is blocksize aligned.
+ */
+inline bool nss_cryptoapi_is_sg_aligned(struct scatterlist *sg,
+					u32 len, const int blksz)
+{
+	int nents;
+
+	for (nents = 0; sg; sg = sg_next(sg), ++nents) {
+		if (!IS_ALIGNED(sg->offset, 4))
+			return false;
+
+		if (len <= sg->length) {
+			if (!IS_ALIGNED(len, blksz))
+				return false;
+
+			return true;
+		}
+
+		if (!IS_ALIGNED(sg->length, blksz))
+			return false;
+
+		len -= sg->length;
+	}
+	return false;
+}
+
+/*
  * nss_cryptoapi_skcipher_init()
  * 	Cryptoapi skcipher init function.
  */
