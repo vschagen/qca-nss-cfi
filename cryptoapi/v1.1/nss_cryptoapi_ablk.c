@@ -533,258 +533,96 @@ int nss_cryptoapi_skcipher_fallback(struct nss_cryptoapi_ctx *ctx,
 	return err;
 }
 
-/*
- * nss_cryptoapi_ablk_aes_encrypt()
- * 	Crytoapi encrypt for aes(aes-cbc/rfc3686-aes-ctr) algorithms.
- */
-int nss_cryptoapi_ablk_aes_encrypt(struct ablkcipher_request *req)
+static bool nss_cryptoapi_check_ctr(uint32_t iv, uint32_t cryptlen)
 {
-	struct nss_crypto_params params = { .req_type = NSS_CRYPTO_REQ_TYPE_ENCRYPT };
-	struct nss_cryptoapi_ablk_info info = {.cb_fn = nss_cryptoapi_ablkcipher_done,
-						.params = &params};
-	struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
-	struct nss_cryptoapi_ctx *ctx = crypto_ablkcipher_ctx(cipher);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_crypto_buf *buf;
+	uint32_t start, end, ctr, blocks;
+
+	/* Compute data length. */
+	blocks = DIV_ROUND_UP(cryptlen, AES_BLOCK_SIZE);
+	ctr = ntohl((iv));
+	/* Check 32bit counter overflow. */
+	start = ctr;
+	end = start + blocks - 1;
+	if (end < start)
+		return true;
+
+	return false;
+}
+
+/*
+ * nss_cryptoapi_skcipher_crypt()
+ * Crytoapi common code for skcipher algorithms.
+ */
+int nss_cryptoapi_skcipher_crypt(struct skcipher_request *req, struct nss_cryptoapi_ablk_info *info)
+{
+	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct nss_cryptoapi_sctx *rctx = skcipher_request_ctx(req);
+	struct crypto_skcipher *skcipher = crypto_skcipher_reqtfm(req);
+	bool overflow = false;
+	int err;
+
+	if (!req->cryptlen)
+		return 0;
 
 	/*
 	 * check cryptoapi context magic number.
 	 */
 	nss_cryptoapi_verify_magic(ctx);
 
-	if (ctx->fallback_req)
-		return nss_cryptoapi_ablkcipher_fallback(ctx, req, NSS_CRYPTOAPI_ENCRYPT);
-
 	/*
-	 * Check if previous call to setkey couldn't allocate session with core crypto.
+	 * Edge case when 32 bit counter overflows in case of CTR we use software
 	 */
-	if (ctx->sid >= NSS_CRYPTO_MAX_IDXS) {
-		nss_cfi_err("Invalid session\n");
-		return -EINVAL;
-	}
+	if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CTR) && (!ctx->is_rfc3686))
+		overflow = nss_cryptoapi_check_ctr(*(uint32_t *)(req->iv + 12),
+						req->cryptlen);
 
-	if (nss_crypto_get_cipher(ctx->sid) != ctx->cip_alg) {
-		nss_cfi_err("Invalid Cipher Algo for session id: %d\n", ctx->sid);
-		return -EINVAL;
-	}
+	if (!(ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CTR))
+		if (!IS_ALIGNED(req->cryptlen, ctx->blksize))
+			return -EINVAL;
 
-	/*
-	 * According to RFC3686, AES-CTR algo need not be padded if the
-	 * plaintext or ciphertext is unaligned to block size boundary.
-	 */
-	if (nss_cryptoapi_check_unalign(req->nbytes, AES_BLOCK_SIZE) && (ctx->cip_alg != NSS_CRYPTO_CIPHER_AES_CTR)) {
-		nss_cfi_err("Invalid cipher len - Not aligned to algo blocksize\n");
-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
-		return -EINVAL;
-	}
+	if ((ctx->fallback_req) || overflow)
+		return nss_cryptoapi_skcipher_fallback(ctx, req);
 
-	buf = nss_cryptoapi_ablk_transform(req, &info);
-	if (!buf) {
-		nss_cfi_err("Invalid parameters\n");
-		return -EINVAL;
-	}
+	rctx->iv_size = crypto_skcipher_ivsize(skcipher);
 
-	/*
-	 *  Send the buffer to CORE layer for processing
-	 */
-	if (nss_crypto_transform_payload(sc->crypto, buf) != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_info("Not enough resources with driver\n");
-		nss_crypto_buf_free(sc->crypto, buf);
-		ctx->queue_failed++;
-		return -EINVAL;
-	}
+	err = nss_cryptoapi_send_req(req, info);
+	if (!(err == -EINPROGRESS))
+		return err;
 
 	ctx->queued++;
 	atomic_inc(&ctx->refcnt);
 
 	return -EINPROGRESS;
+}
+
+/*
+ * nss_cryptoapi_skcipher_encrypt()
+ * Crytoapi encrypt for des/aes-ecb/cbc/rfc3686/ctr) algorithms.
+ */
+int nss_cryptoapi_skcipher_encrypt(struct skcipher_request *req)
+{
+	struct nss_crypto_params params = { .req_type = NSS_CRYPTO_REQ_TYPE_ENCRYPT };
+	struct nss_cryptoapi_ablk_info info = {.cb_fn = nss_cryptoapi_skcipher_done,
+						.params = &params};
+	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+
+	ctx->op = NSS_CRYPTO_REQ_TYPE_ENCRYPT;
+
+	return nss_cryptoapi_skcipher_crypt(req, &info);
 }
 
 /*
  * nss_cryptoapi_ablk_aes_decrypt()
- * 	Crytoapi decrypt for aes(aes-cbc/rfc3686-aes-ctr) algorithms.
+ * 	Crytoapi decrypt for des/aes-ecb/cbc/rfc3686/ctr) algorithms.
  */
-int nss_cryptoapi_ablk_aes_decrypt(struct ablkcipher_request *req)
+int nss_cryptoapi_skcipher_decrypt(struct skcipher_request *req)
 {
 	struct nss_crypto_params params = { .req_type = NSS_CRYPTO_REQ_TYPE_DECRYPT };
-	struct nss_cryptoapi_ablk_info info = {.cb_fn = nss_cryptoapi_ablkcipher_done,
+	struct nss_cryptoapi_ablk_info info = {.cb_fn = nss_cryptoapi_skcipher_done,
 						.params = &params};
-	struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
-	struct nss_cryptoapi_ctx *ctx = crypto_ablkcipher_ctx(cipher);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_crypto_buf *buf;
-
-	/*
-	 * check cryptoapi context magic number.
-	 */
-	nss_cryptoapi_verify_magic(ctx);
-
-	if (ctx->fallback_req)
-		return nss_cryptoapi_ablkcipher_fallback(ctx, req, NSS_CRYPTOAPI_DECRYPT);
-
-	/*
-	 * Check if previous call to setkey couldn't allocate session with core crypto.
-	 */
-	if (ctx->sid >= NSS_CRYPTO_MAX_IDXS) {
-		nss_cfi_err("Invalid session\n");
-		return -EINVAL;
-	}
-
-	if (nss_crypto_get_cipher(ctx->sid) != ctx->cip_alg) {
-		nss_cfi_err("Invalid Cipher Algo for session id: %d\n", ctx->sid);
-		return -EINVAL;
-	}
-
-	/*
-	 * According to RFC3686, AES-CTR algo need not be padded if the
-	 * plaintext or ciphertext is unaligned to block size boundary.
-	 */
-	if (nss_cryptoapi_check_unalign(req->nbytes, AES_BLOCK_SIZE) && (ctx->cip_alg != NSS_CRYPTO_CIPHER_AES_CTR)) {
-		nss_cfi_err("Invalid cipher len - Not aligned to algo blocksize\n");
-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
-		return -EINVAL;
-	}
-
-	buf = nss_cryptoapi_ablk_transform(req, &info);
-	if (!buf) {
-		nss_cfi_err("Invalid parameters\n");
-		return -EINVAL;
-	}
-
-	/*
-	 *  Send the buffer to CORE layer for processing
-	 */
-	if (nss_crypto_transform_payload(sc->crypto, buf) != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_info("Not enough resources with driver\n");
-		nss_crypto_buf_free(sc->crypto, buf);
-		ctx->queue_failed++;
-		return -EINVAL;
-	}
-
-	ctx->queued++;
-	atomic_inc(&ctx->refcnt);
-
-	return -EINPROGRESS;
-}
-
-/*
- * nss_cryptoapi_3des_cbc_encrypt()
- * 	Cryptoapi DES3 CBC encrypt function.
- */
-int nss_cryptoapi_3des_cbc_encrypt(struct ablkcipher_request *req)
-{
-	struct nss_cryptoapi *sc = &gbl_ctx;
 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
-	struct nss_crypto_params params = { .req_type = NSS_CRYPTO_REQ_TYPE_ENCRYPT };
-	struct nss_crypto_buf *buf;
-	struct nss_cryptoapi_ablk_info info;
 
-	/*
-	 * check cryptoapi context magic number.
-	 */
-	nss_cryptoapi_verify_magic(ctx);
+	ctx->op = NSS_CRYPTO_REQ_TYPE_DECRYPT;
 
-	/*
-	 * Check if previous call to setkey couldn't allocate session with core crypto.
-	 */
-	if (ctx->sid >= NSS_CRYPTO_MAX_IDXS) {
-		nss_cfi_err("Invalid session\n");
-		return -EINVAL;
-	}
-
-	if (nss_crypto_get_cipher(ctx->sid) != NSS_CRYPTO_CIPHER_DES) {
-		nss_cfi_err("Invalid Algo for session id: %d\n", ctx->sid);
-		return -EINVAL;
-	}
-
-	if (nss_cryptoapi_check_unalign(req->nbytes, DES3_EDE_BLOCK_SIZE)) {
-		nss_cfi_err("Invalid cipher len - Not aligned to algo blocksize\n");
-		crypto_ablkcipher_set_flags(crypto_ablkcipher_reqtfm(req), CRYPTO_TFM_RES_BAD_BLOCK_LEN);
-		return -EINVAL;
-	}
-
-	info.params = &params;
-	info.cb_fn = nss_cryptoapi_ablkcipher_done;
-
-	buf = nss_cryptoapi_ablk_transform(req, &info);
-	if (!buf) {
-		nss_cfi_err("Invalid parameters\n");
-		return -EINVAL;
-	}
-
-	/*
-	 *  Send the buffer to CORE layer for processing
-	 */
-	if (nss_crypto_transform_payload(sc->crypto, buf) != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_info("Not enough resources with driver\n");
-		nss_crypto_buf_free(sc->crypto, buf);
-		ctx->queue_failed++;
-		return -EINVAL;
-	}
-
-	ctx->queued++;
-	atomic_inc(&ctx->refcnt);
-
-	return -EINPROGRESS;
-}
-
-/*
- * nss_cryptoapi_3des_cbc_decrypt()
- * 	Cryptoapi DES3 CBC decrypt function.
- */
-int nss_cryptoapi_3des_cbc_decrypt(struct ablkcipher_request *req)
-{
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
-	struct nss_crypto_params params = { .req_type = NSS_CRYPTO_REQ_TYPE_DECRYPT };
-	struct nss_crypto_buf *buf;
-	struct nss_cryptoapi_ablk_info info;
-
-	/*
-	 * check cryptoapi context magic number.
-	 */
-	nss_cryptoapi_verify_magic(ctx);
-
-	/*
-	 * Check if previous call to setkey couldn't allocate session with core crypto.
-	 */
-	if (ctx->sid >= NSS_CRYPTO_MAX_IDXS) {
-		nss_cfi_err("Invalid session\n");
-		return -EINVAL;
-	}
-
-	if (nss_crypto_get_cipher(ctx->sid) != NSS_CRYPTO_CIPHER_DES) {
-		nss_cfi_err("Invalid Algo for session id: %d\n", ctx->sid);
-		return -EINVAL;
-	}
-
-	if (nss_cryptoapi_check_unalign(req->nbytes, DES3_EDE_BLOCK_SIZE)) {
-		nss_cfi_err("Invalid cipher len - Not aligned to algo blocksize\n");
-		crypto_ablkcipher_set_flags(crypto_ablkcipher_reqtfm(req), CRYPTO_TFM_RES_BAD_BLOCK_LEN);
-		return -EINVAL;
-	}
-
-	info.params = &params;
-	info.cb_fn = nss_cryptoapi_ablkcipher_done;
-
-	buf = nss_cryptoapi_ablk_transform(req, &info);
-	if (!buf) {
-		nss_cfi_err("Invalid parameters\n");
-		return -EINVAL;
-	}
-
-	/*
-	 *  Send the buffer to CORE layer for processing
-	 */
-	if (nss_crypto_transform_payload(sc->crypto, buf) != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_info("Not enough resources with driver\n");
-		nss_crypto_buf_free(sc->crypto, buf);
-		ctx->queue_failed++;
-		return -EINVAL;
-	}
-
-	ctx->queued++;
-	atomic_inc(&ctx->refcnt);
-
-	return -EINPROGRESS;
+	return nss_cryptoapi_skcipher_crypt(req, &info);
 }
