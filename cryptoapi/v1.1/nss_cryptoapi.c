@@ -260,6 +260,51 @@ static struct skcipher_alg cryptoapi_skcipher_algs[] = {
 			.cra_exit       = nss_cryptoapi_skcipher_exit,
 		},
 	},
+	{
+		.setkey         = nss_cryptoapi_skcipher_setkey,
+		.encrypt        = nss_cryptoapi_skcipher_encrypt,
+		.decrypt        = nss_cryptoapi_skcipher_decrypt,
+		.ivsize         = AES_BLOCK_SIZE,
+		.min_keysize    = AES_MIN_KEY_SIZE,
+		.max_keysize    = AES_MAX_KEY_SIZE,
+		.base = {
+			.cra_name       = "ctr(aes)",
+			.cra_driver_name = "nss-ctr-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = 1,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0xf,
+			.cra_module     = THIS_MODULE,
+			.cra_init           = nss_cryptoapi_skcipher_init,
+			.cra_exit           = nss_cryptoapi_skcipher_exit,
+		},
+	},
+	{
+		.setkey         = nss_cryptoapi_skcipher_setkey,
+		.encrypt        = nss_cryptoapi_skcipher_encrypt,
+		.decrypt        = nss_cryptoapi_skcipher_decrypt,
+		.min_keysize    = AES_MIN_KEY_SIZE,
+		.max_keysize    = AES_MAX_KEY_SIZE,
+		.ivsize         = 0,
+		.base = {
+			.cra_name       = "ecb(aes)",
+			.cra_driver_name = "nss-ecb-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = AES_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0xf,
+			.cra_module     = THIS_MODULE,
+			.cra_init       = nss_cryptoapi_skcipher_init,
+			.cra_exit       = nss_cryptoapi_skcipher_exit,
+
+		},
+	},
 };
 
 /*
