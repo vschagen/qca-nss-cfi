@@ -31,21 +31,6 @@
 #define NSS_CRYPTOAPI_MAGIC		0x7FED
 
 /*
- * Key lengths for supported algorithms
- */
-enum nss_cryptoapi_keylen {
-	NSS_CRYPTOAPI_KEYLEN_AES128 = 16,
-	NSS_CRYPTOAPI_KEYLEN_AES256 = 32,
-	NSS_CRYPTOAPI_KEYLEN_AES192 = 24,
-	NSS_CRYPTOAPI_KEYLEN_3DES = 24,
-};
-
-enum nss_cryptoapi_fallback_type {
-	NSS_CRYPTOAPI_ENCRYPT,
-	NSS_CRYPTOAPI_DECRYPT,
-};
-
-/*
  * Cryptoapi sg virtual addresses used during Encryption/Decryption operations
  */
 struct nss_cryptoapi_addr {
@@ -75,12 +60,40 @@ struct nss_cryptoapi_ctx {
 	uint32_t sid;
 	atomic_t refcnt;
 	uint16_t authsize;
+	uint16_t blksize;
 	uint16_t magic;
-	uint32_t ctx_iv[AES_BLOCK_SIZE/sizeof(uint32_t)];
+	uint32_t nonce;
 	bool fallback_req;
 	enum nss_crypto_cipher cip_alg;
 	enum nss_crypto_auth auth_alg;
 	enum nss_crypto_req_type op;
+	bool is_rfc3686;
+	bool fake_seqiv;
+	bool session_allocated;
+	nss_crypto_comp_t cb_fn;	/**< completion callback function */
+};
+
+struct nss_cryptoapi_sctx {
+	uint32_t			iv_size;
+	struct scatterlist		*sg_src;
+	struct scatterlist		*sg_dst;
+	/* request fallback, keep at the end */
+	struct skcipher_request fallback_req;
+};
+
+struct nss_cryptoapi_actx {
+	uint32_t			iv_size;
+	struct scatterlist		*sg_src;
+	struct scatterlist		*sg_dst;
+	/* request fallback, keep at the end */
+	struct aead_request fallback_req;
+};
+
+struct nss_cryptoapi_bufctx {
+	bool		complete;
+	struct skcipher_request	*req;
+	uint8_t		*iv_addr;
+	uint32_t	original_ctx0;
 };
 
 static inline void nss_cryptoapi_verify_magic(struct nss_cryptoapi_ctx *ctx)
@@ -126,31 +139,24 @@ void nss_cryptoapi_debugfs_exit(struct nss_cryptoapi *gbl_ctx);
 /* AEAD */
 int nss_cryptoapi_aead_init(struct crypto_aead *aead);
 void nss_cryptoapi_aead_exit(struct crypto_aead *aead);
-int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen);
-int nss_cryptoapi_sha1_3des_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen);
-int nss_cryptoapi_sha256_3des_setkey(struct crypto_aead *tfm, const u8 *key, unsigned int keylen);
+int nss_cryptoapi_aead_setkey(struct crypto_aead *aead, const u8 *key, unsigned int keylen);
 
 int nss_cryptoapi_aead_setauthsize(struct crypto_aead *authenc, unsigned int authsize);
-int nss_cryptoapi_aead_aes_encrypt(struct aead_request *req);
-int nss_cryptoapi_aead_aes_decrypt(struct aead_request *req);
+int nss_cryptoapi_aead_encrypt(struct aead_request *req);
+int nss_cryptoapi_aead_decrypt(struct aead_request *req);
 
-int nss_cryptoapi_sha1_3des_encrypt(struct aead_request *req);
-int nss_cryptoapi_sha1_3des_decrypt(struct aead_request *req);
+/* SKCIPHER */
+int nss_cryptoapi_skcipher_init(struct crypto_tfm *tfm);
+void nss_cryptoapi_skcipher_exit(struct crypto_tfm *tfm);
+int nss_cryptoapi_skcipher_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int len);
 
-int nss_cryptoapi_sha256_3des_encrypt(struct aead_request *req);
-int nss_cryptoapi_sha256_3des_decrypt(struct aead_request *req);
+int nss_cryptoapi_skcipher_encrypt(struct skcipher_request *req);
+int nss_cryptoapi_skcipher_decrypt(struct skcipher_request *req);
 
-/* ABLKCIPHER */
-int nss_cryptoapi_ablkcipher_init(struct crypto_tfm *tfm);
-void nss_cryptoapi_ablkcipher_exit(struct crypto_tfm *tfm);
-int nss_cryptoapi_ablk_aes_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int len);
-int nss_cryptoapi_3des_cbc_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int len);
-
-int nss_cryptoapi_ablk_aes_encrypt(struct ablkcipher_request *req);
-int nss_cryptoapi_ablk_aes_decrypt(struct ablkcipher_request *req);
-
-int nss_cryptoapi_3des_cbc_encrypt(struct ablkcipher_request *req);
-int nss_cryptoapi_3des_cbc_decrypt(struct ablkcipher_request *req);
+/* Helper functions */
+inline void nss_cryptoapi_free_sg_cpy(const int len, struct scatterlist **sg);
+inline int nss_cryptoapi_make_sg_cpy(struct scatterlist *src,
+		struct scatterlist **dst, int len, const bool copy);
+inline bool nss_cryptoapi_is_sg_aligned(struct scatterlist *sg, u32 len, const int blksz);
 
 #endif /* __NSS_CRYPTOAPI_PRIVATE_H */
-
