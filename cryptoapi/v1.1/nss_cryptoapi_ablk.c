@@ -469,6 +469,188 @@ void nss_cryptoapi_skcipher_done(struct nss_crypto_buf *buf)
 }
 
 /*
+ * Poor mans Scatter/gather function:
+ * Create a Descriptor for every segment to avoid copying buffers.
+ * For performance better to wait for hardware to perform multiple DMA
+ *
+ */
+int nss_cryptoapi_scatter_combine(struct scatterlist *sgsrc,
+			struct scatterlist *sgdst, u32 datalen,
+			bool complete, struct skcipher_request *req)
+{
+	struct crypto_skcipher *cipher = crypto_skcipher_reqtfm(req);
+	struct nss_cryptoapi_ctx *ctx = crypto_skcipher_ctx(cipher);
+	struct nss_cryptoapi_sctx *rctx = skcipher_request_ctx(req);
+	struct nss_crypto_buf *buf;
+	struct nss_cryptoapi_bufctx *bufctx;
+	struct nss_cryptoapi *sc = &gbl_ctx;
+	unsigned int remainin, remainout;
+	int offsetin = 0,offsetout = 0;
+	u32 n, len, ctr;
+	uint8_t *saddr, *srcAddr;
+	uint8_t *daddr, *dstAddr;
+	uint8_t *iv_addr;
+	bool nextin = false;
+	bool nextout = false;
+	bool first = true;
+	uint32_t next_iv[AES_BLOCK_SIZE / sizeof(u32)];
+	int max_len = 65520;
+
+	/* cheat to make cryptsetup happy.. */
+	if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) && (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT)) {
+		if (datalen > 65520) {
+			datalen = 65520;
+			max_len = 65520;
+		}
+	}
+
+	n = datalen;
+	remainin = min(sgsrc->length, n);
+	remainout = min(sgdst->length, n);
+	saddr = sg_virt(sgsrc);
+	daddr = sg_virt(sgdst);
+
+	do {
+		if (nextin) {
+			sgsrc = sg_next(sgsrc);
+			remainin = min(sgsrc->length, n);
+			if (remainin == 0)
+				continue;
+
+			saddr = sg_virt(sgsrc);
+			offsetin = 0;
+			nextin = false;
+		}
+
+		if (nextout) {
+			sgdst = sg_next(sgdst);
+			remainout = min(sgdst->length, n);
+			if (remainout == 0)
+				continue;
+
+			daddr = sg_virt(sgdst);
+			offsetout = 0;
+			nextout = false;
+		}
+		srcAddr = saddr + offsetin;
+		dstAddr = daddr + offsetout;
+
+		if (remainin == remainout) {
+			len = remainin;
+				nextin = true;
+				nextout = true;
+		} else if (remainin < remainout) {
+			len = remainin;
+				offsetout += len;
+				remainout -= len;
+				nextin = true;
+		} else {
+			len = remainout;
+				offsetin += len;
+				remainin -= len;
+				nextout = true;
+		}
+
+		if (len > max_len) {
+			remainin -= max_len;
+			remainout -= max_len;
+			offsetin += max_len;
+			offsetout += max_len;
+			len = max_len;
+			nextin = false;
+			nextout = false;
+		}
+
+		n -= len;
+
+		/*
+		 * Allocate crypto buf
+		 */
+		buf = nss_crypto_buf_alloc(sc->crypto);
+		if (!buf) {
+			nss_cfi_err("not able to allocate crypto buffer\n");
+			return -ENOMEM;
+		}
+		bufctx = kmalloc(sizeof(struct nss_cryptoapi_bufctx), GFP_KERNEL);
+		bufctx->req = req;
+		bufctx->original_ctx0 = buf->ctx_0;
+
+		if (!rctx->iv_size)
+			goto skipiv;
+
+		iv_addr = nss_crypto_get_ivaddr(buf);
+
+		if (first) {
+			memcpy(next_iv, req->iv, rctx->iv_size);
+			if (ctx->is_rfc3686) {
+				next_iv[2] = next_iv[1];
+				next_iv[1] = next_iv[0];
+				next_iv[0] = ctx->nonce;
+				next_iv[3] = htonl(0x1);
+				rctx->iv_size =  AES_BLOCK_SIZE; /* reset size to ctr mode */
+			}
+			memcpy(iv_addr, next_iv, rctx->iv_size);
+			first = false;
+		} else {
+			if (ctx->op == NSS_CRYPTO_REQ_TYPE_DECRYPT)
+				memcpy(iv_addr, next_iv, rctx->iv_size);
+			else
+				if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) ||
+					(ctx->cip_alg == NSS_CRYPTO_CIPHER_DES)) {
+					buf->iv_addr = (uint32_t)bufctx->iv_addr;
+				} else {
+					memcpy(iv_addr, next_iv, rctx->iv_size);
+				}
+		}
+		/* Next round IV */
+		if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) || (ctx->cip_alg == NSS_CRYPTO_CIPHER_DES)) {
+			if (ctx->op == NSS_CRYPTO_REQ_TYPE_DECRYPT)
+				memcpy(next_iv, srcAddr + len - rctx->iv_size, rctx->iv_size);
+			else
+				bufctx->iv_addr = dstAddr + len - rctx->iv_size;
+		}
+
+		if (ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CTR) {
+			ctr = DIV_ROUND_UP(len, AES_BLOCK_SIZE);
+			do {
+				ctr--;
+				crypto_inc((u8 *)next_iv, AES_BLOCK_SIZE);
+			} while (ctr);
+		}
+		/*
+		 * Last segment set complete and return IV to request
+		 */
+skipiv:
+		if (n == 0) {
+			bufctx->complete = true;
+			if (rctx->iv_size) {
+				if ((ctx->op == NSS_CRYPTO_REQ_TYPE_DECRYPT) ||
+					(ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CTR))
+				memcpy(req->iv, next_iv, rctx->iv_size);
+			}
+		} else {
+			bufctx->complete = false;
+		}
+
+		nss_crypto_set_cb(buf, ctx->cb_fn, bufctx);
+		nss_crypto_set_session_idx(buf, ctx->sid);
+		nss_crypto_set_data(buf, srcAddr, dstAddr, len);
+		nss_crypto_set_transform_len(buf, len, 0);
+		/*
+		 *  Send the buffer to CORE layer for processing
+		 */
+		if (nss_crypto_transform_payload(sc->crypto, buf) != NSS_CRYPTO_STATUS_OK) {
+			nss_cfi_info("Not enough resources with driver\n");
+			nss_crypto_buf_free(sc->crypto, buf);
+			ctx->queue_failed++;
+			return -EINVAL;
+		} /* FIXME cleanup bounce-buffer */
+	} while (n);
+
+	return -EINPROGRESS;
+}
+
+/*
  * nss_cryptoapi_ablk_checkaddr()
  * 	Cryptoapi: obtain sg to virtual address mapping.
  * 	Check for multiple sg in src and dst
