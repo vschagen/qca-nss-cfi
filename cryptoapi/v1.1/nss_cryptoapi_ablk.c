@@ -683,31 +683,57 @@ int nss_cryptoapi_ablk_checkaddr(struct ablkcipher_request *req)
 }
 
 /*
- * nss_cryptoapi_ablk_transform()
- * 	Crytoapi common routine for encryption and decryption operations.
+ * nss_cryptoapi_send_req()
+ * 	Send request. Replaces transform function.
  */
-struct nss_crypto_buf *nss_cryptoapi_ablk_transform(struct ablkcipher_request *req, struct nss_cryptoapi_ablk_info *info)
+static int nss_cryptoapi_send_req(struct skcipher_request *req, struct nss_cryptoapi_ablk_info *info)
 {
-	struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
-	struct nss_cryptoapi_ctx *ctx = crypto_ablkcipher_ctx(cipher);
-	struct nss_crypto_buf *buf;
+	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+	struct nss_cryptoapi_sctx *rctx = skcipher_request_ctx(req);
 	struct nss_cryptoapi *sc = &gbl_ctx;
 	nss_crypto_status_t status;
-	uint16_t iv_size;
-	uint16_t cipher_len = 0, auth_len = 0;
-	uint8_t *iv_addr;
+	struct scatterlist *src;
+	struct scatterlist *dst;
+	int src_nents, dst_nents;
+	bool src_align = true, dst_align = true;
+	int err;
 
-	nss_cfi_assert(ctx);
+	rctx->sg_src = req->src;
+	src = req->src;
+	rctx->sg_dst = req->dst;
+	dst = req->dst;
 
-	nss_cfi_dbg("src_vaddr: 0x%p, dst_vaddr: 0x%p, iv: 0x%p\n",
-			sg_virt(req->src), sg_virt(req->dst), req->info);
+	src_nents = sg_nents_for_len(src, req->cryptlen);
+	dst_nents = sg_nents_for_len(dst, req->cryptlen);
 
-	info->params->cipher_skip = 0;
-	info->params->auth_skip = 0;
+	src_align = nss_cryptoapi_is_sg_aligned(src, req->cryptlen, ctx->blksize);
+	if (src == dst)
+		dst_align = src_align;
+	else
+		dst_align = nss_cryptoapi_is_sg_aligned(dst, req->cryptlen, ctx->blksize);
 
-	if (nss_cryptoapi_ablk_checkaddr(req)) {
-		nss_cfi_err("Invalid address!!\n");
-		return NULL;
+	if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) || (ctx->cip_alg == NSS_CRYPTO_CIPHER_DES)) {
+		if (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT) {
+			src_align = false;
+			dst_align = false;
+		}
+	}
+
+	if (!src_align) {
+		err = nss_cryptoapi_make_sg_cpy(rctx->sg_src, &rctx->sg_src,
+					req->cryptlen, true);
+		if (err)
+			return err;
+		src = rctx->sg_src;
+	}
+
+	if (!dst_align) {
+		err = nss_cryptoapi_make_sg_cpy(rctx->sg_dst, &rctx->sg_dst,
+					req->cryptlen, false);
+		if (err)
+			return err;
+
+		dst = rctx->sg_dst;
 	}
 
 	/*
@@ -716,68 +742,12 @@ struct nss_crypto_buf *nss_cryptoapi_ablk_transform(struct ablkcipher_request *r
 	status = nss_crypto_session_update(sc->crypto, ctx->sid, info->params);
 	if (status != NSS_CRYPTO_STATUS_OK) {
 		nss_cfi_err("Invalid crypto session parameters\n");
-		return NULL;
+		return -EINVAL;
 	}
 
-	/*
-	 * Allocate crypto buf
-	 */
-	buf = nss_crypto_buf_alloc(sc->crypto);
-	if (!buf) {
-		nss_cfi_err("not able to allocate crypto buffer\n");
-		return NULL;
-	}
+	err = nss_cryptoapi_scatter_combine(src, dst, req->cryptlen, true, req);
 
-	/*
-	 * set crypto buffer callback
-	 */
-	nss_crypto_set_cb(buf, info->cb_fn, req);
-	nss_crypto_set_session_idx(buf, ctx->sid);
-
-	/*
-	 * Get IV location and memcpy the IV
-	 */
-	iv_size = crypto_ablkcipher_ivsize(cipher);
-	iv_addr = nss_crypto_get_ivaddr(buf);
-
-	switch (ctx->cip_alg) {
-	case NSS_CRYPTO_CIPHER_AES_CBC:
-	case NSS_CRYPTO_CIPHER_DES:
-		memcpy(iv_addr, req->info, iv_size);
-		break;
-
-	case NSS_CRYPTO_CIPHER_AES_CTR:
-		((uint32_t *)iv_addr)[0] = ctx->ctx_iv[0];
-		((uint32_t *)iv_addr)[1] = ((uint32_t *)req->info)[0];
-		((uint32_t *)iv_addr)[2] = ((uint32_t *)req->info)[1];
-		((uint32_t *)iv_addr)[3] = ctx->ctx_iv[3];
-		break;
-
-	default:
-		/*
-		 * Should never happen
-		 */
-		nss_cfi_err("Invalid cipher algo: %d\n", ctx->cip_alg);
-		nss_cfi_assert(false);
-	}
-
-	/*
-	 * Fill Cipher and Auth len
-	 */
-	cipher_len = req->nbytes;
-	auth_len = 0;
-
-	nss_crypto_set_data(buf, sg_virt(req->src), sg_virt(req->dst), cipher_len);
-	nss_crypto_set_transform_len(buf, cipher_len, auth_len);
-
-	nss_cfi_dbg("cipher_len: %d, iv_len: %d, auth_len: %d"
-			"cipher_skip: %d, auth_skip: %d\n",
-			buf->cipher_len, iv_size, buf->auth_len,
-			info->params->cipher_skip, info->params->auth_skip);
-	nss_cfi_dbg("before transformation\n");
-	nss_cfi_dbg_data(sg_virt(req->src), cipher_len, ' ');
-
-	return buf;
+	return err;
 }
 
 /*
