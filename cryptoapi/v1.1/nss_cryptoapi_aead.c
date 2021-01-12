@@ -85,80 +85,83 @@ EXPORT_SYMBOL(nss_cryptoapi_aead_ctx2session);
  * nss_cryptoapi_aead_init()
  * 	Cryptoapi aead init function.
  */
-int nss_cryptoapi_aead_init(struct crypto_aead *aead)
-{
-	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct crypto_aead *sw_tfm;
+ int nss_cryptoapi_aead_init(struct crypto_aead *aead)
+ {
+ 	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
+ 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	nss_cfi_assert(ctx);
+ 	nss_cfi_assert(ctx);
 
-	ctx->sid = NSS_CRYPTO_MAX_IDXS;
-	ctx->queued = 0;
-	ctx->completed = 0;
-	ctx->queue_failed = 0;
-	ctx->fallback_req = 0;
-	ctx->sw_tfm = NULL;
-	atomic_set(&ctx->refcnt, 0);
+ 	ctx->session_allocated = false;
+ 	ctx->sid = NSS_CRYPTO_MAX_IDXS;
+ 	ctx->queued = 0;
+ 	ctx->completed = 0;
+ 	ctx->queue_failed = 0;
+ 	ctx->fallback_req = 0;
+ 	ctx->sw_tfm = NULL;
+ 	atomic_set(&ctx->refcnt, 1);
 
-	nss_cryptoapi_set_magic(ctx);
+ 	nss_cryptoapi_set_magic(ctx);
 
-	if (!(crypto_tfm_alg_flags(tfm) & CRYPTO_ALG_NEED_FALLBACK))
-		return 0;
+ 	if ((tfm->__crt_alg->cra_flags) & CRYPTO_ALG_NEED_FALLBACK) {
+ 		aead = crypto_alloc_aead(crypto_tfm_alg_name(tfm), 0,
+ 				CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK);
+ 		ctx->sw_tfm = crypto_aead_tfm(aead);
+ 		if (IS_ERR(ctx->sw_tfm)) {
+ 			nss_cfi_err("Unable to allocate fallback for aead:%s\n",
+			 		crypto_tfm_alg_name(tfm));
+ 			return -EINVAL;
+ 		}
+ 	}
 
-	/* Alloc fallback transform for future use */
-	sw_tfm = crypto_alloc_aead(crypto_tfm_alg_name(tfm), 0, CRYPTO_ALG_ASYNC | CRYPTO_ALG_NEED_FALLBACK);
-	if (IS_ERR(sw_tfm)) {
-		nss_cfi_err("Unable to allocate fallback for aead:%s\n", crypto_tfm_alg_name(tfm));
-		return 0;
-	}
+ 	if (ctx->sw_tfm)
+ 		crypto_aead_set_reqsize(__crypto_aead_cast(tfm),
+ 				sizeof(struct nss_cryptoapi_actx) +
+ 					crypto_aead_reqsize(aead));
+ 	else
+ 		crypto_aead_set_reqsize(__crypto_aead_cast(tfm),
+ 			offsetof(struct nss_cryptoapi_actx, fallback_req));
 
-	/* set this tfm reqsize same to fallback tfm */
-	crypto_aead_set_reqsize(aead, crypto_aead_reqsize(sw_tfm));
-	ctx->sw_tfm = crypto_aead_tfm(sw_tfm);
+ 	return 0;
+ }
 
-	return 0;
-}
+ /*
+  * nss_cryptoapi_aead_exit()
+  * 	Cryptoapi aead exit function.
+  */
+ void nss_cryptoapi_aead_exit(struct crypto_aead *aead)
+ {
+ 	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
+ 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
 
-/*
- * nss_cryptoapi_aead_exit()
- * 	Cryptoapi aead exit function.
- */
-void nss_cryptoapi_aead_exit(struct crypto_aead *aead)
-{
-	struct crypto_tfm *tfm = crypto_aead_tfm(aead);
-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
-	struct nss_cryptoapi *sc = &gbl_ctx;
-	nss_crypto_status_t status;
+ 	nss_crypto_status_t status;
 
-	nss_cfi_assert(ctx);
+ 	nss_cfi_assert(ctx);
 
-	if (!atomic_dec_and_test(&ctx->refcnt)) {
-		nss_cfi_err("Process done is not completed, while exit is called\n");
-		nss_cfi_assert(false);
-	}
+ 	if (!atomic_dec_and_test(&ctx->refcnt)) {
+ 		nss_cfi_err("Process done is not completed, while exit is called\n");
+ 		nss_cfi_assert(false);
+ 	}
 
-	if (ctx->sw_tfm) {
-		crypto_free_aead(__crypto_aead_cast(ctx->sw_tfm));
-		ctx->sw_tfm = NULL;
-	}
+ 	if (ctx->sw_tfm) {
+ 		crypto_free_aead(__crypto_aead_cast(ctx->sw_tfm));
+ 		ctx->sw_tfm = NULL;
+ 	}
 
-	/*
-	 * When sid is NSS_CRYPTO_MAX_IDXS, it means that it didn't allocate
-	 * session from qca-nss-crypto, it maybe uses software crypto.
-	 */
-	if (ctx->sid == NSS_CRYPTO_MAX_IDXS)
-		return;
+ 	if (ctx->session_allocated) {
+ 		nss_cryptoapi_debugfs_del_session(ctx);
+ 		status = nss_crypto_send_session_update(ctx->sid,
+ 				NSS_CRYPTO_SESSION_STATE_FREE,
+ 				NSS_CRYPTO_CIPHER_NULL);
 
-	nss_cryptoapi_debugfs_del_session(ctx);
+ 		if (status != NSS_CRYPTO_STATUS_OK) {
+ 			nss_cfi_err("unable to free session: idx %d\n", ctx->sid);
+ 		}
+ 		ctx->session_allocated = false;
+ 	}
 
-	status = nss_crypto_session_free(sc->crypto, ctx->sid);
-	if (status != NSS_CRYPTO_STATUS_OK) {
-		nss_cfi_err("unable to free session: idx %d\n", ctx->sid);
-	}
-
-	nss_cryptoapi_clear_magic(ctx);
-}
+ 	nss_cryptoapi_clear_magic(ctx);
+ }
 
 /*
  * nss_cryptoapi_aead_extract_key()
