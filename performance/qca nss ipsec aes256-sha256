@@ -1,16 +1,4 @@
-root@OpenWrt:~# ip xfrm state
-src 10.10.10.1 dst 10.10.10.2
-	proto esp spi 0xcac0d366 reqid 1 mode tunnel
-	replay-window 0 flag af-unspec
-	auth-trunc hmac(sha1) 0x8319edb8372192fc7f31941aeb2014b1ddbae759 96
-	enc cbc(aes) 0x683e1b8774bf0e88b79d2bf61f06055a
-	anti-replay context: seq 0x0, oseq 0x37a3f, bitmap 0x00000000
-src 10.10.10.2 dst 10.10.10.1
-	proto esp spi 0xc5042c79 reqid 1 mode tunnel
-	replay-window 32 flag af-unspec
-	auth-trunc hmac(sha1) 0xe63f9929cefcf8aeea69a719b1b2a7ef9a741ef9 96
-	enc cbc(aes) 0xa78c4d7ebd898f708295dad321beb30e
-	anti-replay context: seq 0x90f85, oseq 0x0, bitmap 0xffffffff
+
 root@OpenWrt:~# ip xfrm state
 src 10.10.10.1 dst 10.10.10.2
 	proto esp spi 0xc97b9ec5 reqid 1 mode tunnel
