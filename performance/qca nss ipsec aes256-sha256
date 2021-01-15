@@ -1,0 +1,101 @@
+root@OpenWrt:~# ip xfrm state
+src 10.10.10.1 dst 10.10.10.2
+	proto esp spi 0xcac0d366 reqid 1 mode tunnel
+	replay-window 0 flag af-unspec
+	auth-trunc hmac(sha1) 0x8319edb8372192fc7f31941aeb2014b1ddbae759 96
+	enc cbc(aes) 0x683e1b8774bf0e88b79d2bf61f06055a
+	anti-replay context: seq 0x0, oseq 0x37a3f, bitmap 0x00000000
+src 10.10.10.2 dst 10.10.10.1
+	proto esp spi 0xc5042c79 reqid 1 mode tunnel
+	replay-window 32 flag af-unspec
+	auth-trunc hmac(sha1) 0xe63f9929cefcf8aeea69a719b1b2a7ef9a741ef9 96
+	enc cbc(aes) 0xa78c4d7ebd898f708295dad321beb30e
+	anti-replay context: seq 0x90f85, oseq 0x0, bitmap 0xffffffff
+root@OpenWrt:~# ip xfrm state
+src 10.10.10.1 dst 10.10.10.2
+	proto esp spi 0xc97b9ec5 reqid 1 mode tunnel
+	replay-window 0 flag af-unspec
+	auth-trunc hmac(sha256) 0x47411eed19399199bd0ccebda63036d016f32a3ca0257ef1a9c63650dc1d3c20 128
+	enc cbc(aes) 0x2aab3492a3819f81a88ece87cc9f626c3061c9c4511bfa32105db29dbacf5c8c
+	anti-replay context: seq 0x0, oseq 0x2, bitmap 0x00000000
+src 10.10.10.2 dst 10.10.10.1
+	proto esp spi 0xc00ff5d2 reqid 1 mode tunnel
+	replay-window 32 flag af-unspec
+	auth-trunc hmac(sha256) 0xfcfd4c2e2745921c2d11a4d1277fb5fdd3d344e07f7e098e0180c5545fd266a2 128
+	enc cbc(aes) 0xdc626820da46d2be4b170312ba3ee93245f5e9c8c89a9808a0e57bf496afcdb0
+	anti-replay context: seq 0x4, oseq 0x0, bitmap 0x0000000f
+root@OpenWrt:~# iperf3 -c 10.1.0.1
+Connecting to host 10.1.0.1, port 5201
+[  5] local 192.168.1.1 port 59492 connected to 10.1.0.1 port 5201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  28.3 MBytes   237 Mbits/sec    0    102 KBytes       
+[  5]   1.00-2.00   sec  28.7 MBytes   241 Mbits/sec    0    158 KBytes       
+[  5]   2.00-3.04   sec  28.1 MBytes   228 Mbits/sec    0    192 KBytes       
+[  5]   3.04-4.01   sec  26.0 MBytes   224 Mbits/sec    0    234 KBytes       
+[  5]   4.01-5.06   sec  31.2 MBytes   250 Mbits/sec    0    356 KBytes       
+[  5]   5.06-6.03   sec  26.2 MBytes   227 Mbits/sec    0    356 KBytes       
+[  5]   6.03-7.02   sec  31.2 MBytes   265 Mbits/sec    0    356 KBytes       
+[  5]   7.02-8.00   sec  31.2 MBytes   266 Mbits/sec    0    356 KBytes       
+[  5]   8.00-9.01   sec  32.1 MBytes   268 Mbits/sec    0    386 KBytes       
+[  5]   9.01-10.04  sec  31.2 MBytes   255 Mbits/sec    0    386 KBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-10.04  sec   294 MBytes   246 Mbits/sec    0             sender
+[  5]   0.00-10.05  sec   294 MBytes   246 Mbits/sec                  receiver
+
+iperf Done.
+root@OpenWrt:~# iperf3 -c 10.1.0.1 -R
+Connecting to host 10.1.0.1, port 5201
+Reverse mode, remote host 10.1.0.1 is sending
+[  5] local 192.168.1.1 port 59496 connected to 10.1.0.1 port 5201
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-1.00   sec  64.3 MBytes   539 Mbits/sec                  
+[  5]   1.00-2.00   sec  69.1 MBytes   580 Mbits/sec                  
+[  5]   2.00-3.00   sec  68.8 MBytes   576 Mbits/sec                  
+[  5]   3.00-4.00   sec  68.6 MBytes   577 Mbits/sec                  
+[  5]   4.00-5.00   sec  69.2 MBytes   581 Mbits/sec                  
+[  5]   5.00-6.00   sec  69.1 MBytes   580 Mbits/sec                  
+[  5]   6.00-7.00   sec  68.5 MBytes   575 Mbits/sec                  
+[  5]   7.00-8.00   sec  69.1 MBytes   579 Mbits/sec                  
+[  5]   8.00-9.00   sec  66.6 MBytes   559 Mbits/sec                  
+[  5]   9.00-10.00  sec  68.6 MBytes   576 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-10.01  sec   685 MBytes   574 Mbits/sec  101             sender
+[  5]   0.00-10.00  sec   682 MBytes   572 Mbits/sec                  receiver
+
+iperf Done.
+root@OpenWrt:~# ip xfrm state
+src 10.10.10.1 dst 10.10.10.2
+	proto esp spi 0xc97b9ec5 reqid 1 mode tunnel
+	replay-window 0 flag af-unspec
+	auth-trunc hmac(sha256) 0x47411eed19399199bd0ccebda63036d016f32a3ca0257ef1a9c63650dc1d3c20 128
+	enc cbc(aes) 0x2aab3492a3819f81a88ece87cc9f626c3061c9c4511bfa32105db29dbacf5c8c
+	anti-replay context: seq 0x0, oseq 0x3816e, bitmap 0x00000000
+src 10.10.10.2 dst 10.10.10.1
+	proto esp spi 0xc00ff5d2 reqid 1 mode tunnel
+	replay-window 32 flag af-unspec
+	auth-trunc hmac(sha256) 0xfcfd4c2e2745921c2d11a4d1277fb5fdd3d344e07f7e098e0180c5545fd266a2 128
+	enc cbc(aes) 0xdc626820da46d2be4b170312ba3ee93245f5e9c8c89a9808a0e57bf496afcdb0
+	anti-replay context: seq 0x9178e, oseq 0x0, bitmap 0xffffffff
+root@OpenWrt:~# iperf3 -c 10.10.10.2
+Connecting to host 10.10.10.2, port 5201
+[  5] local 10.10.10.1 port 36402 connected to 10.10.10.2 port 5201
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec   113 MBytes   945 Mbits/sec    0    378 KBytes       
+[  5]   1.00-2.00   sec   112 MBytes   941 Mbits/sec    0    378 KBytes       
+[  5]   2.00-3.00   sec   112 MBytes   940 Mbits/sec    0    396 KBytes       
+[  5]   3.00-4.00   sec   112 MBytes   938 Mbits/sec    0    396 KBytes       
+[  5]   4.00-5.00   sec   112 MBytes   938 Mbits/sec    0    396 KBytes       
+[  5]   5.00-6.00   sec   112 MBytes   939 Mbits/sec    0    396 KBytes       
+[  5]   6.00-7.00   sec   112 MBytes   939 Mbits/sec    0    396 KBytes       
+[  5]   7.00-8.00   sec   112 MBytes   940 Mbits/sec    0    396 KBytes       
+[  5]   8.00-9.00   sec   112 MBytes   938 Mbits/sec    0    396 KBytes       
+[  5]   9.00-10.00  sec   112 MBytes   941 Mbits/sec    0    396 KBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-10.00  sec  1.09 GBytes   940 Mbits/sec    0             sender
+[  5]   0.00-10.02  sec  1.09 GBytes   938 Mbits/sec                  receiver
+
+iperf Done.
+

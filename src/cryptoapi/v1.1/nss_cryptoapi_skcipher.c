@@ -43,6 +43,7 @@
 #include <crypto/authenc.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/internal/skcipher.h>
+#include <crypto/internal/des.h>
 
 #include <nss_api_if.h>
 #include <nss_crypto_if.h>
@@ -173,6 +174,74 @@ inline bool nss_cryptoapi_is_sg_aligned(struct scatterlist *sg,
 		len -= sg->length;
 	}
 	return false;
+}
+
+/*
+ * nss_cryptoapi_skcipher_done()
+ * 	Cipher operation completion callback function
+ */
+void nss_cryptoapi_skcipher_done(struct nss_crypto_buf *buf)
+{
+	struct nss_cryptoapi_ctx *ctx;
+	struct skcipher_request *req;
+	struct nss_cryptoapi_sctx *rctx;
+	struct nss_cryptoapi_bufctx *bufctx;
+	bool complete;
+	int err = 0;
+
+	nss_cfi_assert(buf);
+
+	bufctx = (struct nss_cryptoapi_bufctx *)nss_crypto_get_cb_ctx(buf);
+	complete = bufctx->complete;
+	buf->ctx_0 = bufctx->original_ctx0;
+
+	req = (struct skcipher_request *)bufctx->req;
+	rctx = skcipher_request_ctx(req);
+
+	/*
+	 * check cryptoapi context magic number.
+	 */
+	ctx = crypto_tfm_ctx(req->base.tfm);
+	nss_cryptoapi_verify_magic(ctx);
+
+	/*
+	 * Free Crypto buffer.
+	 */
+	nss_crypto_buf_free(gbl_ctx.crypto, buf);
+	kfree(bufctx);
+
+	if (!complete)
+		return;
+
+	/* Store IV for next round (CBC mode only) */
+	if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) ||
+			(ctx->cip_alg == NSS_CRYPTO_CIPHER_DES)) {
+		if (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT)
+			memcpy(req->iv, bufctx->iv_addr, rctx->iv_size);
+	}
+	if (rctx->sg_src != req->src)
+		nss_cryptoapi_free_sg_copy(req->cryptlen, &rctx->sg_src);
+
+	if (rctx->sg_dst != req->dst) {
+		sg_copy_from_buffer(req->dst, sg_nents(req->dst),
+				sg_virt(rctx->sg_dst), req->cryptlen);
+		nss_cryptoapi_free_sg_copy(req->cryptlen, &rctx->sg_dst);
+	}
+
+	nss_cfi_dbg("after transformation\n");
+	nss_cfi_dbg_data(sg_virt(req->dst), req->cryptlen, ' ');
+
+	nss_cfi_assert(atomic_read(&ctx->refcnt));
+	atomic_dec(&ctx->refcnt);
+
+	/*
+	 * Passing always pass in case of encrypt.
+	 * Perhaps whenever core crypto invloke callback routine, it is always pass.
+	 */
+
+	req->base.complete(&req->base, err);
+
+	ctx->completed++;
 }
 
 /*
@@ -401,74 +470,6 @@ fail:
 }
 
 /*
- * nss_cryptoapi_skcipher_done()
- * 	Cipher operation completion callback function
- */
-void nss_cryptoapi_skcipher_done(struct nss_crypto_buf *buf)
-{
-	struct nss_cryptoapi_ctx *ctx;
-	struct skcipher_request *req;
-	struct nss_cryptoapi_sctx *rctx;
-	struct nss_cryptoapi_bufctx *bufctx;
-	bool complete;
-	int err = 0;
-
-	nss_cfi_assert(buf);
-
-	bufctx = (struct nss_cryptoapi_bufctx *)nss_crypto_get_cb_ctx(buf);
-	complete = bufctx->complete;
-	buf->ctx_0 = bufctx->original_ctx0;
-
-	req = (struct skcipher_request *)bufctx->req;
-	rctx = skcipher_request_ctx(req);
-
-	/*
-	 * check cryptoapi context magic number.
-	 */
-	ctx = crypto_tfm_ctx(req->base.tfm);
-	nss_cryptoapi_verify_magic(ctx);
-
-	/*
-	 * Free Crypto buffer.
-	 */
-	nss_crypto_buf_free(gbl_ctx.crypto, buf);
-	kfree(bufctx);
-
-	if (!complete)
-		return;
-
-	/* Store IV for next round (CBC mode only) */
-	if ((ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CBC) ||
-			(ctx->cip_alg == NSS_CRYPTO_CIPHER_DES)) {
-		if (ctx->op == NSS_CRYPTO_REQ_TYPE_ENCRYPT)
-			memcpy(req->iv, bufctx->iv_addr, rctx->iv_size);
-	}
-	if (rctx->sg_src != req->src)
-		nss_cryptoapi_free_sg_cpy(req->cryptlen, &rctx->sg_src);
-
-	if (rctx->sg_dst != req->dst) {
-		sg_copy_from_buffer(req->dst, sg_nents(req->dst),
-				sg_virt(rctx->sg_dst), req->cryptlen);
-		nss_cryptoapi_free_sg_cpy(req->cryptlen, &rctx->sg_dst);
-	}
-
-	nss_cfi_dbg("after transformation\n");
-	nss_cfi_dbg_data(sg_virt(req->dst), req->cryptlen, ' ');
-
-	nss_cfi_assert(atomic_read(&ctx->refcnt));
-	atomic_dec(&ctx->refcnt);
-
-	/*
-	 * Passing always pass in case of encrypt.
-	 * Perhaps whenever core crypto invloke callback routine, it is always pass.
-	 */
-
-	req->base.complete(&req->base, err);
-
-	ctx->completed++;
-}
-
-/*
  * Poor mans Scatter/gather function:
  * Create a Descriptor for every segment to avoid copying buffers.
  * For performance better to wait for hardware to perform multiple DMA
@@ -688,7 +689,7 @@ static int nss_cryptoapi_send_req(struct skcipher_request *req, struct nss_crypt
 	}
 
 	if (!src_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_src, &rctx->sg_src,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_src, &rctx->sg_src,
 					req->cryptlen, true);
 		if (err)
 			return err;
@@ -696,7 +697,7 @@ static int nss_cryptoapi_send_req(struct skcipher_request *req, struct nss_crypt
 	}
 
 	if (!dst_align) {
-		err = nss_cryptoapi_make_sg_cpy(rctx->sg_dst, &rctx->sg_dst,
+		err = nss_cryptoapi_make_sg_copy(rctx->sg_dst, &rctx->sg_dst,
 					req->cryptlen, false);
 		if (err)
 			return err;

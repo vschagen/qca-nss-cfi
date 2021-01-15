@@ -60,143 +60,143 @@ struct nss_cryptoapi gbl_ctx;
 /*
  * AEAD (Cipher and Authentication)
  */
- struct aead_alg cryptoapi_aead_algs[] = {
- 	{
- 		.init       = nss_cryptoapi_aead_init,
- 		.exit       = nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize         = DES3_EDE_BLOCK_SIZE,
- 		.maxauthsize    = SHA1_DIGEST_SIZE,
- 		.base = {
- 			.cra_name       = "authenc(hmac(sha1),cbc(des3_ede))",
- 			.cra_driver_name = "nss-hmac-sha1-cbc-3des",
- 			.cra_priority   = 300,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
-  						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- 	{
- 		.init       = nss_cryptoapi_aead_init,
- 		.exit       = nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize         = DES3_EDE_BLOCK_SIZE,
- 		.maxauthsize    = SHA256_DIGEST_SIZE,
- 		.base  = {
- 			.cra_name       = "authenc(hmac(sha256),cbc(des3_ede))",
- 			.cra_driver_name = "nss-hmac-sha256-cbc-3des",
- 			.cra_priority   = 300,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
-  						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- 	{
- 		.init       = nss_cryptoapi_aead_init,
- 		.exit       = nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize         = AES_BLOCK_SIZE,
- 		.maxauthsize    = SHA1_DIGEST_SIZE,
- 		.base = {
- 			.cra_name       = "authenc(hmac(sha1),cbc(aes))",
- 			.cra_driver_name = "nss-hmac-sha1-cbc-aes",
- 			.cra_priority   = 10000,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
-  						CRYPTO_ALG_NEED_FALLBACK |
+struct aead_alg cryptoapi_aead_algs[] = {
+	{
+		.init       = nss_cryptoapi_aead_init,
+		.exit       = nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize         = DES3_EDE_BLOCK_SIZE,
+		.maxauthsize    = SHA1_DIGEST_SIZE,
+		.base = {
+			.cra_name       = "authenc(hmac(sha1),cbc(des3_ede))",
+			.cra_driver_name = "nss-hmac-sha1-cbc-3des",
+			.cra_priority   = 300,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
  						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = AES_BLOCK_SIZE,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- 	{
- 		.init	= nss_cryptoapi_aead_init,
- 		.exit	= nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize         = AES_BLOCK_SIZE,
- 		.maxauthsize    = SHA256_DIGEST_SIZE,
- 		.base = {
- 			.cra_name       = "authenc(hmac(sha256),cbc(aes))",
- 			.cra_driver_name = "nss-hmac-sha256-cbc-aes",
- 			.cra_priority   = 10000,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
-  						CRYPTO_ALG_NEED_FALLBACK |
+			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+	{
+		.init       = nss_cryptoapi_aead_init,
+		.exit       = nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize         = DES3_EDE_BLOCK_SIZE,
+		.maxauthsize    = SHA256_DIGEST_SIZE,
+		.base  = {
+			.cra_name       = "authenc(hmac(sha256),cbc(des3_ede))",
+			.cra_driver_name = "nss-hmac-sha256-cbc-3des",
+			.cra_priority   = 300,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
  						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = AES_BLOCK_SIZE,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- 	{
- 		.init	= nss_cryptoapi_aead_init,
- 		.exit	= nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize = CTR_RFC3686_IV_SIZE,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.maxauthsize = SHA1_DIGEST_SIZE,
- 		.base = {
- 			.cra_name       = "authenc(hmac(sha1),rfc3686(ctr(aes)))",
- 			.cra_driver_name = "nss-hmac-sha1-rfc3686-ctr-aes",
- 			.cra_priority   = 10000,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
- 						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = 1,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- 	{
- 		.init	= nss_cryptoapi_aead_init,
- 		.exit	= nss_cryptoapi_aead_exit,
- 		.setkey = nss_cryptoapi_aead_setkey,
- 		.setauthsize = nss_cryptoapi_aead_setauthsize,
- 		.encrypt = nss_cryptoapi_aead_encrypt,
- 		.decrypt = nss_cryptoapi_aead_decrypt,
- 		.ivsize         = CTR_RFC3686_IV_SIZE,
- 		.maxauthsize    = SHA256_DIGEST_SIZE,
- 		.base = {
- 			.cra_name       = "authenc(hmac(sha256),rfc3686(ctr(aes)))",
- 			.cra_driver_name = "nss-hmac-sha256-rfc3686-ctr-aes",
- 			.cra_priority   = 10000,
- 			.cra_flags      = CRYPTO_ALG_ASYNC |
-  						CRYPTO_ALG_NEED_FALLBACK |
- 						CRYPTO_ALG_KERN_DRIVER_ONLY,
- 			.cra_blocksize  = 1,
- 			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
- 			.cra_alignmask  = 0,
- 			.cra_module     = THIS_MODULE,
- 		},
- 	},
- };
+			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+	{
+		.init       = nss_cryptoapi_aead_init,
+		.exit       = nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize         = AES_BLOCK_SIZE,
+		.maxauthsize    = SHA1_DIGEST_SIZE,
+		.base = {
+			.cra_name       = "authenc(hmac(sha1),cbc(aes))",
+			.cra_driver_name = "nss-hmac-sha1-cbc-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+ 						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = AES_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+	{
+		.init	= nss_cryptoapi_aead_init,
+		.exit	= nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize         = AES_BLOCK_SIZE,
+		.maxauthsize    = SHA256_DIGEST_SIZE,
+		.base = {
+			.cra_name       = "authenc(hmac(sha256),cbc(aes))",
+			.cra_driver_name = "nss-hmac-sha256-cbc-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+ 						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = AES_BLOCK_SIZE,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+	{
+		.init	= nss_cryptoapi_aead_init,
+		.exit	= nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize = CTR_RFC3686_IV_SIZE,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.maxauthsize = SHA1_DIGEST_SIZE,
+		.base = {
+			.cra_name       = "authenc(hmac(sha1),rfc3686(ctr(aes)))",
+			.cra_driver_name = "nss-hmac-sha1-rfc3686-ctr-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = 1,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+	{
+		.init	= nss_cryptoapi_aead_init,
+		.exit	= nss_cryptoapi_aead_exit,
+		.setkey = nss_cryptoapi_aead_setkey,
+		.setauthsize = nss_cryptoapi_aead_setauthsize,
+		.encrypt = nss_cryptoapi_aead_encrypt,
+		.decrypt = nss_cryptoapi_aead_decrypt,
+		.ivsize         = CTR_RFC3686_IV_SIZE,
+		.maxauthsize    = SHA256_DIGEST_SIZE,
+		.base = {
+			.cra_name       = "authenc(hmac(sha256),rfc3686(ctr(aes)))",
+			.cra_driver_name = "nss-hmac-sha256-rfc3686-ctr-aes",
+			.cra_priority   = 10000,
+			.cra_flags      = CRYPTO_ALG_ASYNC |
+ 						CRYPTO_ALG_NEED_FALLBACK |
+						CRYPTO_ALG_KERN_DRIVER_ONLY,
+			.cra_blocksize  = 1,
+			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
+			.cra_alignmask  = 0,
+			.cra_module     = THIS_MODULE,
+		},
+	},
+};
 
  /*
   *   skcipher cipher algorithms
   */
 
- static struct skcipher_alg cryptoapi_skcipher_algs[] = {
+static struct skcipher_alg cryptoapi_skcipher_algs[] = {
  	{
  		.setkey         = nss_cryptoapi_skcipher_setkey,
  		.encrypt        = nss_cryptoapi_skcipher_encrypt,
@@ -308,124 +308,6 @@ struct nss_cryptoapi gbl_ctx;
  			.cra_exit       = nss_cryptoapi_skcipher_exit,
  		},
  	},
- };
-
-/*
- *   skcipher cipher algorithms
- */
-
-static struct skcipher_alg cryptoapi_skcipher_algs[] = {
-	{
-		.setkey         = nss_cryptoapi_skcipher_setkey,
-		.encrypt        = nss_cryptoapi_skcipher_encrypt,
-		.decrypt        = nss_cryptoapi_skcipher_decrypt,
-		.min_keysize    = AES_MIN_KEY_SIZE,
-		.max_keysize    = AES_MAX_KEY_SIZE,
-		.ivsize         = AES_BLOCK_SIZE,
-		.base = {
-			.cra_name       = "cbc(aes)",
-			.cra_driver_name = "nss-cbc-aes",
-			.cra_priority   = 10000,
-			.cra_flags      = CRYPTO_ALG_ASYNC |
-						CRYPTO_ALG_NEED_FALLBACK |
-						CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize  = AES_BLOCK_SIZE,
-			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-			.cra_alignmask  = 0xf,
-			.cra_module     = THIS_MODULE,
-			.cra_init       = nss_cryptoapi_skcipher_init,
-			.cra_exit       = nss_cryptoapi_skcipher_exit,
-
-		},
-	},
-	{
-		.setkey         = nss_cryptoapi_skcipher_setkey,
-		.encrypt        = nss_cryptoapi_skcipher_encrypt,
-		.decrypt        = nss_cryptoapi_skcipher_decrypt,
-		.ivsize         = CTR_RFC3686_IV_SIZE,
-		.min_keysize    = AES_MIN_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
-		.max_keysize    = AES_MAX_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
-		.base = {
-			.cra_name       = "rfc3686(ctr(aes))",
-			.cra_driver_name = "nss-rfc3686-ctr-aes",
-			.cra_priority   = 30000,
-			.cra_flags      = CRYPTO_ALG_ASYNC |
-						CRYPTO_ALG_NEED_FALLBACK |
-						CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize  = 1,
-			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-			.cra_alignmask  = 0xf,
-			.cra_module     = THIS_MODULE,
-			.cra_init       = nss_cryptoapi_skcipher_init,
-			.cra_exit       = nss_cryptoapi_skcipher_exit,
-		},
-	},
-	{
-		.setkey         = nss_cryptoapi_skcipher_setkey,
-		.encrypt        = nss_cryptoapi_skcipher_encrypt,
-		.decrypt        = nss_cryptoapi_skcipher_decrypt,
-		.ivsize         = DES3_EDE_BLOCK_SIZE,
-		.min_keysize    = DES3_EDE_KEY_SIZE,
-		.max_keysize    = DES3_EDE_KEY_SIZE,
-		.base = {
-			.cra_name       = "cbc(des3_ede)",
-			.cra_driver_name = "nss-cbc-3des",
-			.cra_priority   = 1000,
-			.cra_flags      = CRYPTO_ALG_ASYNC |
-						CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize  = DES3_EDE_BLOCK_SIZE,
-			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-			.cra_alignmask  = 0,
-			.cra_module     = THIS_MODULE,
-			.cra_init       = nss_cryptoapi_skcipher_init,
-			.cra_exit       = nss_cryptoapi_skcipher_exit,
-		},
-	},
-	{
-		.setkey         = nss_cryptoapi_skcipher_setkey,
-		.encrypt        = nss_cryptoapi_skcipher_encrypt,
-		.decrypt        = nss_cryptoapi_skcipher_decrypt,
-		.ivsize         = AES_BLOCK_SIZE,
-		.min_keysize    = AES_MIN_KEY_SIZE,
-		.max_keysize    = AES_MAX_KEY_SIZE,
-		.base = {
-			.cra_name       = "ctr(aes)",
-			.cra_driver_name = "nss-ctr-aes",
-			.cra_priority   = 10000,
-			.cra_flags      = CRYPTO_ALG_ASYNC |
-						CRYPTO_ALG_NEED_FALLBACK |
-						CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize  = 1,
-			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-			.cra_alignmask  = 0xf,
-			.cra_module     = THIS_MODULE,
-			.cra_init           = nss_cryptoapi_skcipher_init,
-			.cra_exit           = nss_cryptoapi_skcipher_exit,
-		},
-	},
-	{
-		.setkey         = nss_cryptoapi_skcipher_setkey,
-		.encrypt        = nss_cryptoapi_skcipher_encrypt,
-		.decrypt        = nss_cryptoapi_skcipher_decrypt,
-		.min_keysize    = AES_MIN_KEY_SIZE,
-		.max_keysize    = AES_MAX_KEY_SIZE,
-		.ivsize         = 0,
-		.base = {
-			.cra_name       = "ecb(aes)",
-			.cra_driver_name = "nss-ecb-aes",
-			.cra_priority   = 10000,
-			.cra_flags      = CRYPTO_ALG_ASYNC |
-						CRYPTO_ALG_NEED_FALLBACK |
-						CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize  = AES_BLOCK_SIZE,
-			.cra_ctxsize    = sizeof(struct nss_cryptoapi_ctx),
-			.cra_alignmask  = 0xf,
-			.cra_module     = THIS_MODULE,
-			.cra_init       = nss_cryptoapi_skcipher_init,
-			.cra_exit       = nss_cryptoapi_skcipher_exit,
-
-		},
-	},
 };
 
 /*
@@ -483,7 +365,7 @@ static nss_crypto_user_ctx_t nss_cryptoapi_register(nss_crypto_handle_t crypto)
 static void nss_cryptoapi_unregister(nss_crypto_user_ctx_t cfi)
 {
 	struct nss_cryptoapi *sc = &gbl_ctx;
-	int i, ret = 0;
+	int i;
 
 	nss_cfi_info("unregister nss_cryptoapi\n");
 

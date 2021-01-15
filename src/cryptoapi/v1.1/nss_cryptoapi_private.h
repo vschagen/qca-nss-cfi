@@ -154,8 +154,8 @@ int nss_cryptoapi_skcipher_encrypt(struct skcipher_request *req);
 int nss_cryptoapi_skcipher_decrypt(struct skcipher_request *req);
 
 /* Helper functions */
-inline void nss_cryptoapi_free_sg_cpy(const int len, struct scatterlist **sg);
-inline int nss_cryptoapi_make_sg_cpy(struct scatterlist *src,
+inline void nss_cryptoapi_free_sg_copy(const int len, struct scatterlist **sg);
+inline int nss_cryptoapi_make_sg_copy(struct scatterlist *src,
 		struct scatterlist **dst, int len, const bool copy);
 inline bool nss_cryptoapi_is_sg_aligned(struct scatterlist *sg, u32 len, const int blksz);
 
